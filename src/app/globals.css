@@ -1,26 +1,174 @@
+/* Pretendard @font-face 정의. scripts/sync-fonts.mjs 가 생성하며,
+ * woff2 조각은 public/fonts 에서 서빙된다. (unicode-range 로 필요한 조각만 다운로드) */
+@import "./pretendard.generated.css";
 @import "tailwindcss";
 
+/*
+ * 모바일(PWA)에서 쓰는 걸 전제로 한 토큰.
+ * 라이트/다크 모두 정의하고, 색은 전부 여기서만 바꾼다.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  /* Pretendard 가 아직 안 왔거나 실패해도 한글이 깨지지 않도록 시스템 폰트로 폴백 */
+  --font-pretendard: "Pretendard Variable", Pretendard, -apple-system,
+    BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", system-ui,
+    sans-serif;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --background: #f5f6f8;
+  --surface: #ffffff;
+  --surface-muted: #f0f1f4;
+  --foreground: #16181d;
+  --muted: #6b7280;
+  --border: #e4e6ea;
+
+  --primary: #3b5bfd;
+  --primary-foreground: #ffffff;
+
+  /* 수입은 파랑, 지출은 빨강 — 국내 가계부 관행 */
+  --income: #1d6fd8;
+  --expense: #e0384f;
+  --transfer: #7c8598;
+
+  --warning: #d97706;
+  --success: #16a34a;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0e0f13;
+    --surface: #191b21;
+    --surface-muted: #23262e;
+    --foreground: #f2f3f5;
+    --muted: #9aa1ae;
+    --border: #2c2f38;
+
+    --primary: #6b85ff;
+    --primary-foreground: #0e0f13;
+
+    --income: #63a4ff;
+    --expense: #ff7085;
+    --transfer: #8d95a5;
+
+    --warning: #f0a742;
+    --success: #4ade80;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-income: var(--income);
+  --color-expense: var(--expense);
+  --color-transfer: var(--transfer);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  --font-sans: var(--font-pretendard);
+}
+
+html {
+  /* 주소창 높이 변화에 흔들리지 않게 */
+  height: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-pretendard);
+  /* iOS 홈 화면 앱에서 바운스 스크롤 억제 */
+  overscroll-behavior-y: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * 앱 셸
+ *
+ * 이 앱은 휴대폰에서 쓰는 걸 전제로 만들었다.
+ * 모바일에서는 화면을 꽉 채우고, PC 같은 넓은 화면에서는
+ * 폰 크기(APP_MAX_WIDTH)로 가운데에 띄우고 바깥은 배경으로 채운다.
+ *
+ * 셸 자체가 스크롤 컨테이너다. 그래서 헤더(sticky top-0)와
+ * 하단 탭(sticky bottom-0)이 폰 프레임 안에 정확히 붙는다.
+ * ------------------------------------------------------------------------- */
+
+.app-backdrop {
+  min-height: 100dvh;
+  display: flex;
+  justify-content: center;
+  background: var(--background);
+}
+
+.app-shell {
+  position: relative;
+  width: 100%;
+  max-width: 512px;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--background);
+  /* 셸 안에서 스크롤이 끝나도 바깥이 따라 움직이지 않게 */
+  overscroll-behavior: contain;
+}
+
+@media (min-width: 768px) {
+  .app-backdrop {
+    align-items: center;
+    padding: 1.5rem 0;
+    /* 넓은 화면에서만 보이는 은은한 배경 */
+    background:
+      radial-gradient(
+        1200px 600px at 50% -10%,
+        color-mix(in srgb, var(--primary) 14%, transparent),
+        transparent 70%
+      ),
+      var(--surface-muted);
+  }
+
+  .app-shell {
+    height: min(940px, calc(100dvh - 3rem));
+    border: 1px solid var(--border);
+    border-radius: 2rem;
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.04),
+      0 12px 40px -8px rgb(0 0 0 / 0.18);
+  }
+}
+
+/* 숫자는 폭이 흔들리지 않게 (금액 정렬용) */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 입력창 포커스 시 iOS 확대 방지: 16px 미만 금지 */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+/* 스크롤바 숨김 (가로 스크롤 칩 목록용) */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

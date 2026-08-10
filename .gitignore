@@ -39,3 +39,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+
+# 폰트 (postinstall 에서 node_modules 로부터 복사)
+/public/fonts
+/src/app/pretendard.generated.css
+
+# 툴이 생성하는 파일 (Prisma CLI 등)
+/.claude
+/.windsurf
+/.agents
+/skills-lock.json

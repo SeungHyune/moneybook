@@ -1,0 +1,50 @@
+{
+  "name": "우리집 가계부",
+  "short_name": "가계부",
+  "description": "부부가 함께 쓰는 가계부. 고정지출과 카드 할부까지 한눈에.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f6f8",
+  "theme_color": "#3b5bfd",
+  "lang": "ko-KR",
+  "dir": "ltr",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "지출 입력",
+      "short_name": "지출 입력",
+      "description": "새 지출 내역을 바로 입력합니다",
+      "url": "/transactions/new?type=EXPENSE",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "고정지출 보기",
+      "short_name": "고정지출",
+      "description": "이번 달 고정지출 일정을 확인합니다",
+      "url": "/fixed",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

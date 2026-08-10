@@ -1,0 +1,277 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { z } from "zod";
+import { prisma } from "@/lib/prisma";
+import { requireMembership } from "@/lib/auth";
+import { getOccurrenceDate } from "@/lib/billing";
+import { toYearMonth } from "@/lib/utils";
+import type { ActionState } from "./household";
+
+const recurringSchema = z.object({
+  householdId: z.string().uuid(),
+  name: z.string().trim().min(1, "이름을 입력해 주세요.").max(40),
+  kind: z.enum([
+    "SALARY",
+    "SIDE_INCOME",
+    "CARD_BILL",
+    "MAINTENANCE_FEE",
+    "TELECOM",
+    "UTILITY",
+    "RENT",
+    "LOAN_REPAYMENT",
+    "INSURANCE",
+    "SUBSCRIPTION",
+    "SAVINGS",
+    "EDUCATION",
+    "MEMBERSHIP",
+    "OTHER",
+  ]),
+  type: z.enum(["INCOME", "EXPENSE"]),
+  amount: z.coerce.number().int().min(0),
+  isAmountVariable: z.coerce.boolean().default(false),
+
+  frequency: z
+    .enum(["MONTHLY", "WEEKLY", "YEARLY", "BIMONTHLY", "QUARTERLY"])
+    .default("MONTHLY"),
+  dayOfMonth: z.coerce.number().int().min(1).max(31).optional(),
+  weekday: z.coerce.number().int().min(0).max(6).optional(),
+  monthOfYear: z.coerce.number().int().min(1).max(12).optional(),
+  dueDateShift: z
+    .enum(["NONE", "PREV_BUSINESS_DAY", "NEXT_BUSINESS_DAY"])
+    .default("NONE"),
+
+  paymentMethod: z.enum([
+    "CASH",
+    "CARD",
+    "BANK_TRANSFER",
+    "AUTO_DEBIT",
+    "MOBILE_PAY",
+    "POINT",
+    "GIFT_CARD",
+    "OTHER",
+  ]),
+  cardId: z.string().uuid().optional().or(z.literal("")),
+  accountId: z.string().uuid().optional().or(z.literal("")),
+  categoryId: z.string().uuid().optional().or(z.literal("")),
+
+  notifyDaysBefore: z.coerce.number().int().min(0).max(14).default(1),
+  memo: z.string().trim().max(200).optional().or(z.literal("")),
+});
+
+function nullify(value: string | undefined) {
+  return value && value.length > 0 ? value : null;
+}
+
+export async function createRecurringRule(
+  _prevState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const raw = Object.fromEntries(formData) as Record<string, string>;
+
+  const parsed = recurringSchema.safeParse({
+    ...raw,
+    isAmountVariable:
+      raw.isAmountVariable === "on" || raw.isAmountVariable === "true",
+    dayOfMonth: raw.dayOfMonth || undefined,
+    weekday: raw.weekday || undefined,
+    monthOfYear: raw.monthOfYear || undefined,
+  });
+
+  if (!parsed.success) {
+    return {
+      error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요.",
+    };
+  }
+
+  const data = parsed.data;
+  await requireMembership(data.householdId, "MEMBER");
+
+  await prisma.recurringRule.create({
+    data: {
+      householdId: data.householdId,
+      name: data.name,
+      kind: data.kind,
+      type: data.type,
+      amount: data.amount,
+      isAmountVariable: data.isAmountVariable,
+      frequency: data.frequency,
+      dayOfMonth: data.dayOfMonth ?? null,
+      weekday: data.weekday ?? null,
+      monthOfYear: data.monthOfYear ?? null,
+      dueDateShift: data.dueDateShift,
+      paymentMethod: data.paymentMethod,
+      cardId: nullify(data.cardId),
+      accountId: nullify(data.accountId),
+      categoryId: nullify(data.categoryId),
+      startDate: new Date(),
+      notifyDaysBefore: data.notifyDaysBefore,
+      memo: nullify(data.memo),
+    },
+  });
+
+  revalidatePath("/", "layout");
+  redirect("/fixed");
+}
+
+export async function toggleRecurringRule(ruleId: string, isActive: boolean) {
+  const rule = await prisma.recurringRule.findUnique({ where: { id: ruleId } });
+  if (!rule) return { error: "고정지출 항목을 찾을 수 없어요." };
+
+  await requireMembership(rule.householdId, "MEMBER");
+
+  await prisma.recurringRule.update({
+    where: { id: ruleId },
+    data: { isActive },
+  });
+
+  revalidatePath("/fixed");
+  return { success: true };
+}
+
+export async function deleteRecurringRule(ruleId: string) {
+  const rule = await prisma.recurringRule.findUnique({ where: { id: ruleId } });
+  if (!rule) return { error: "고정지출 항목을 찾을 수 없어요." };
+
+  await requireMembership(rule.householdId, "MEMBER");
+
+  await prisma.recurringRule.delete({ where: { id: ruleId } });
+
+  revalidatePath("/", "layout");
+  return { success: true };
+}
+
+const markPaidSchema = z.object({
+  ruleId: z.string().uuid(),
+  yearMonth: z.string().regex(/^\d{4}-\d{2}$/),
+  actualAmount: z.coerce.number().int().min(0),
+});
+
+/**
+ * 고정지출 "납부 완료" 처리.
+ * 실제 거래를 하나 만들고 이번 달 회차에 연결한다.
+ */
+export async function markOccurrencePaid(
+  _prevState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = markPaidSchema.safeParse({
+    ruleId: formData.get("ruleId"),
+    yearMonth: formData.get("yearMonth"),
+    actualAmount: formData.get("actualAmount"),
+  });
+
+  if (!parsed.success) {
+    return { error: "금액을 확인해 주세요." };
+  }
+
+  const { ruleId, yearMonth, actualAmount } = parsed.data;
+
+  const rule = await prisma.recurringRule.findUnique({ where: { id: ruleId } });
+  if (!rule) return { error: "고정지출 항목을 찾을 수 없어요." };
+
+  const { member } = await requireMembership(rule.householdId, "MEMBER");
+
+  const dueDate =
+    getOccurrenceDate({
+      yearMonth,
+      frequency: rule.frequency,
+      dayOfMonth: rule.dayOfMonth,
+      weekday: rule.weekday,
+      monthOfYear: rule.monthOfYear,
+      dueDateShift: rule.dueDateShift,
+    }) ?? new Date();
+
+  await prisma.$transaction(async (tx) => {
+    const transaction = await tx.transaction.create({
+      data: {
+        householdId: rule.householdId,
+        type: rule.type,
+        amount: actualAmount,
+        occurredAt: dueDate,
+        merchant: rule.name,
+        memo: rule.memo,
+        categoryId: rule.categoryId,
+        paymentMethod: rule.paymentMethod,
+        cardId: rule.cardId,
+        accountId: rule.accountId,
+        payerMemberId: member.id,
+        createdByMemberId: member.id,
+        recurringRuleId: rule.id,
+      },
+    });
+
+    await tx.recurringOccurrence.upsert({
+      where: { ruleId_yearMonth: { ruleId, yearMonth } },
+      create: {
+        ruleId,
+        yearMonth,
+        dueDate,
+        expectedAmount: rule.amount,
+        actualAmount,
+        status: "PAID",
+        paidAt: new Date(),
+        transactionId: transaction.id,
+      },
+      update: {
+        actualAmount,
+        status: "PAID",
+        paidAt: new Date(),
+        transactionId: transaction.id,
+      },
+    });
+
+    // 계좌에서 자동이체로 빠지는 항목이면 잔액 반영
+    if (rule.accountId && rule.paymentMethod !== "CARD") {
+      await tx.account.update({
+        where: { id: rule.accountId },
+        data:
+          rule.type === "INCOME"
+            ? { balance: { increment: actualAmount } }
+            : { balance: { decrement: actualAmount } },
+      });
+    }
+  });
+
+  revalidatePath("/", "layout");
+  return { success: "처리했어요." };
+}
+
+/** 이번 달 건너뛰기 */
+export async function skipOccurrence(ruleId: string, yearMonth: string) {
+  const rule = await prisma.recurringRule.findUnique({ where: { id: ruleId } });
+  if (!rule) return { error: "고정지출 항목을 찾을 수 없어요." };
+
+  await requireMembership(rule.householdId, "MEMBER");
+
+  const dueDate =
+    getOccurrenceDate({
+      yearMonth,
+      frequency: rule.frequency,
+      dayOfMonth: rule.dayOfMonth,
+      weekday: rule.weekday,
+      monthOfYear: rule.monthOfYear,
+      dueDateShift: rule.dueDateShift,
+    }) ?? new Date();
+
+  await prisma.recurringOccurrence.upsert({
+    where: { ruleId_yearMonth: { ruleId, yearMonth } },
+    create: {
+      ruleId,
+      yearMonth,
+      dueDate,
+      expectedAmount: rule.amount,
+      status: "SKIPPED",
+    },
+    update: { status: "SKIPPED" },
+  });
+
+  revalidatePath("/fixed");
+  return { success: true };
+}
+
+/** 오늘 기준 이번 달 문자열 */
+export async function currentYearMonth() {
+  return toYearMonth(new Date());
+}

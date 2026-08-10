@@ -1,0 +1,573 @@
+// 가계부(moneybook) 데이터 모델
+// - 부부/가족이 하나의 Household 를 공유하는 구조
+// - 금액은 모두 "원 단위 정수(Int)". 원화는 소수점이 없고,
+//   Decimal 은 서버 컴포넌트 -> 클라이언트 직렬화에서 걸리기 때문에 Int 를 쓴다.
+// docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// 가구 내 권한
+enum MemberRole {
+  OWNER //  가구 생성자. 멤버 초대/삭제, 가구 삭제 가능
+  ADMIN //  초대/설정 변경 가능
+  MEMBER //  거래 입력/수정 가능 (부부 기본값)
+  VIEWER //  읽기 전용
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+/// 거래 종류
+enum TransactionType {
+  INCOME //  수입
+  EXPENSE //  지출
+  TRANSFER //  계좌 간 이체 (통계에서 제외)
+}
+
+/// 결제 수단
+enum PaymentMethod {
+  CASH //  현금
+  CARD //  카드 (신용/체크는 Card.type 으로 구분)
+  BANK_TRANSFER //  계좌이체
+  AUTO_DEBIT //  자동이체 / CMS 출금 (관리비, 통신비 등)
+  MOBILE_PAY //  간편결제 (카카오페이/네이버페이 등). 연결 카드가 있으면 cardId 세팅
+  POINT //  포인트/마일리지
+  GIFT_CARD //  상품권/기프티콘
+  OTHER
+}
+
+/// 카드 종류
+enum CardType {
+  CREDIT //  신용카드
+  DEBIT //  체크카드
+  PREPAID //  선불/충전식
+}
+
+/// 자산 계좌 종류
+enum AccountType {
+  CHECKING //  입출금 통장
+  SAVINGS //  적금/예금
+  CASH //  현금 지갑
+  INVESTMENT //  투자 계좌
+  LOAN //  대출 (마이너스 자산)
+  OTHER
+}
+
+/// 고정 수입/지출의 성격 - 사용자가 "카드값 / 월급 / 관리비 / 통신비" 를 구분해서 보기 위한 분류
+enum RecurringKind {
+  SALARY //  월급
+  SIDE_INCOME //  부수입
+  CARD_BILL //  카드 대금 결제
+  MAINTENANCE_FEE //  아파트 관리비
+  TELECOM //  통신비 (휴대폰/인터넷)
+  UTILITY //  공과금 (전기/가스/수도)
+  RENT //  월세/전세 이자
+  LOAN_REPAYMENT //  대출 상환
+  INSURANCE //  보험료
+  SUBSCRIPTION //  구독 서비스 (넷플릭스 등)
+  SAVINGS //  저축/적금 납입
+  EDUCATION //  교육비/학원비
+  MEMBERSHIP //  회비
+  OTHER
+}
+
+/// 반복 주기
+enum Frequency {
+  MONTHLY
+  WEEKLY
+  YEARLY
+  BIMONTHLY //  격월
+  QUARTERLY //  분기
+}
+
+/// 납부일이 주말/공휴일일 때 처리 방식
+enum DueDateShift {
+  NONE //  그대로
+  PREV_BUSINESS_DAY //  앞당김 (급여일이 보통 이렇다)
+  NEXT_BUSINESS_DAY //  미룸
+}
+
+/// 고정지출 회차 상태
+enum OccurrenceStatus {
+  PENDING //  예정
+  PAID //  납부 완료
+  SKIPPED //  이번 달 건너뜀
+  OVERDUE //  연체
+}
+
+// ---------------------------------------------------------------------------
+// 사용자 / 가구 / 초대
+// ---------------------------------------------------------------------------
+
+/// Supabase auth.users 와 1:1 로 대응되는 프로필.
+/// id 에 Supabase auth user id(uuid) 를 그대로 넣는다.
+model User {
+  id        String   @id @db.Uuid
+  email     String?  @unique
+  nickname  String
+  avatarUrl String?
+  /// 카카오 로그인 시 provider id 보관 (동일인 식별/디버깅용)
+  kakaoId   String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships     HouseholdMember[]
+  sentInvites     Invite[]          @relation("InviteCreatedBy")
+  /// 마지막으로 보고 있던 가구 (여러 가구에 속할 수 있으므로)
+  lastHouseholdId String?           @db.Uuid
+
+  @@map("users")
+}
+
+/// 가계부 공간. 부부가 함께 쓰는 단위.
+model Household {
+  id       String @id @default(uuid()) @db.Uuid
+  name     String
+  currency String @default("KRW")
+
+  /// 가계부 한 달의 시작일. 1이면 매월 1일~말일, 25면 25일~다음달 24일
+  monthStartDay Int    @default(1)
+  timezone      String @default("Asia/Seoul")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members      HouseholdMember[]
+  invites      Invite[]
+  accounts     Account[]
+  cards        Card[]
+  categories   Category[]
+  transactions Transaction[]
+  recurring    RecurringRule[]
+  budgets      Budget[]
+  statements   CardStatement[]
+
+  @@map("households")
+}
+
+model HouseholdMember {
+  id          String     @id @default(uuid()) @db.Uuid
+  householdId String     @db.Uuid
+  userId      String     @db.Uuid
+  role        MemberRole @default(MEMBER)
+  /// 가구 안에서 표시할 이름 ("남편", "아내" 등)
+  displayName String?
+  /// 프로필/차트에서 이 사람을 나타낼 색
+  color       String     @default("#6366f1")
+  joinedAt    DateTime   @default(now())
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  ownedAccounts Account[]     @relation("AccountOwner")
+  ownedCards    Card[]        @relation("CardOwner")
+  createdTx     Transaction[] @relation("TxCreatedBy")
+  paidTx        Transaction[] @relation("TxPaidBy")
+
+  @@unique([householdId, userId])
+  @@index([userId])
+  @@map("household_members")
+}
+
+/// 초대 코드 / 초대 링크
+model Invite {
+  id          String       @id @default(uuid()) @db.Uuid
+  householdId String       @db.Uuid
+  /// 공유 링크에 들어가는 짧은 코드 (예: 8자리)
+  code        String       @unique
+  role        MemberRole   @default(MEMBER)
+  status      InviteStatus @default(PENDING)
+  /// 특정 이메일로만 수락 가능하게 제한하고 싶을 때
+  email       String?
+  memo        String?
+
+  maxUses   Int      @default(1)
+  usedCount Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  invitedById String @db.Uuid
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation("InviteCreatedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([householdId])
+  @@map("invites")
+}
+
+// ---------------------------------------------------------------------------
+// 자산: 계좌 / 카드
+// ---------------------------------------------------------------------------
+
+model Account {
+  id          String      @id @default(uuid()) @db.Uuid
+  householdId String      @db.Uuid
+  name        String //  "신한 주거래"
+  type        AccountType @default(CHECKING)
+  bankName    String?
+  /// 계좌번호 뒤 4자리만 (전체 번호는 저장하지 않는다)
+  last4       String?
+  /// 현재 잔액 (원). LOAN 이면 음수로 관리
+  balance     Int         @default(0)
+  color       String      @default("#0ea5e9")
+  isActive    Boolean     @default(true)
+  sortOrder   Int         @default(0)
+  memo        String?
+
+  ownerMemberId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  household   Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  ownerMember HouseholdMember? @relation("AccountOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
+
+  transactions   Transaction[]   @relation("TxAccount")
+  incomingTx     Transaction[]   @relation("TxToAccount")
+  cards          Card[] //  이 계좌를 결제 계좌로 쓰는 카드들
+  recurringRules RecurringRule[]
+
+  @@index([householdId])
+  @@map("accounts")
+}
+
+model Card {
+  id          String   @id @default(uuid()) @db.Uuid
+  householdId String   @db.Uuid
+  name        String //  "신한 Deep Dream"
+  issuer      String? //  카드사 (신한/삼성/현대...)
+  type        CardType @default(CREDIT)
+  last4       String?
+  color       String   @default("#8b5cf6")
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+
+  /// 이 카드 주인 (부부 중 누구 카드인지)
+  ownerMemberId String? @db.Uuid
+
+  // --- 신용카드 청구 주기 ---
+  /// 결제일. 매월 며칠에 카드값이 빠져나가는지 (예: 25)
+  billingDay        Int? //  체크카드면 null
+  /// 이용기간 시작일. 예: 12 -> 전월 12일부터
+  statementStartDay Int?
+  /// 이용기간 종료일. 예: 11 -> 당월 11일까지
+  statementEndDay   Int?
+  /// 카드값이 빠져나가는 결제 계좌
+  paymentAccountId  String? @db.Uuid
+  /// 신용 한도 (원)
+  creditLimit       Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  household      Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  ownerMember    HouseholdMember? @relation("CardOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
+  paymentAccount Account?         @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+
+  transactions   Transaction[]
+  statements     CardStatement[]
+  recurringRules RecurringRule[]
+
+  @@index([householdId])
+  @@map("cards")
+}
+
+// ---------------------------------------------------------------------------
+// 카테고리
+// ---------------------------------------------------------------------------
+
+model Category {
+  id          String          @id @default(uuid()) @db.Uuid
+  householdId String          @db.Uuid
+  name        String
+  type        TransactionType @default(EXPENSE)
+  /// lucide 아이콘 이름 또는 이모지
+  icon        String?
+  color       String          @default("#64748b")
+  sortOrder   Int             @default(0)
+  /// 기본 제공 카테고리 여부 (삭제 방지용)
+  isSystem    Boolean         @default(false)
+  isActive    Boolean         @default(true)
+
+  parentId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  household Household  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Category[] @relation("CategoryTree")
+
+  transactions   Transaction[]
+  recurringRules RecurringRule[]
+  budgets        Budget[]
+
+  @@unique([householdId, type, name, parentId])
+  @@index([householdId])
+  @@map("categories")
+}
+
+// ---------------------------------------------------------------------------
+// 거래
+// ---------------------------------------------------------------------------
+
+model Transaction {
+  id          String          @id @default(uuid()) @db.Uuid
+  householdId String          @db.Uuid
+  type        TransactionType
+  /// 금액 (원, 양수)
+  amount      Int
+  /// 거래(결제) 일시
+  occurredAt  DateTime
+  /// 사용처 / 상호명
+  merchant    String?
+  memo        String?
+
+  categoryId String? @db.Uuid
+
+  // --- 결제 수단 상세 ---
+  paymentMethod PaymentMethod @default(CARD)
+  /// 카드 결제일 때 어떤 카드로 긁었는지
+  cardId        String?       @db.Uuid
+  /// 현금/이체/자동이체일 때 어느 계좌에서 나갔는지 (수입이면 들어온 계좌)
+  accountId     String?       @db.Uuid
+  /// TRANSFER 일 때 받는 계좌
+  toAccountId   String?       @db.Uuid
+
+  // --- 할부 ---
+  /// 1 = 일시불, 2 이상 = 할부 개월수
+  installmentMonths Int     @default(1)
+  /// 무이자 할부 여부
+  isInterestFree    Boolean @default(true)
+  /// 할부 수수료 총액 (유이자 할부일 때)
+  interestAmount    Int     @default(0)
+
+  /// 카드 승인번호 (있으면 중복 입력 방지에 유용)
+  approvalNo String?
+
+  // --- 누가 ---
+  /// 실제로 결제한 사람
+  payerMemberId     String? @db.Uuid
+  /// 앱에 입력한 사람
+  createdByMemberId String? @db.Uuid
+  /// 부부 공동 지출인지, 개인 지출인지
+  isShared          Boolean @default(true)
+
+  /// 통계/예산에서 제외 (계좌 간 이동, 보정 등)
+  excludeFromStats Boolean  @default(false)
+  /// 영수증 이미지 (Supabase Storage 경로)
+  receiptUrl       String?
+  tags             String[] @default([])
+
+  // --- 고정지출에서 생성된 거래인 경우 ---
+  recurringRuleId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  household     Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  category      Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  card          Card?            @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  account       Account?         @relation("TxAccount", fields: [accountId], references: [id], onDelete: SetNull)
+  toAccount     Account?         @relation("TxToAccount", fields: [toAccountId], references: [id], onDelete: SetNull)
+  payer         HouseholdMember? @relation("TxPaidBy", fields: [payerMemberId], references: [id], onDelete: SetNull)
+  createdBy     HouseholdMember? @relation("TxCreatedBy", fields: [createdByMemberId], references: [id], onDelete: SetNull)
+  recurringRule RecurringRule?   @relation(fields: [recurringRuleId], references: [id], onDelete: SetNull)
+
+  installments InstallmentPlan[]
+  occurrence   RecurringOccurrence?
+
+  @@index([householdId, occurredAt])
+  @@index([householdId, categoryId])
+  @@index([cardId, occurredAt])
+  @@index([accountId, occurredAt])
+  @@map("transactions")
+}
+
+/// 할부 회차별 청구 스케줄.
+/// 3개월 할부면 이 레코드가 3개 생기고, 월별 카드 청구 예정액은 이걸 합산해서 계산한다.
+model InstallmentPlan {
+  id            String   @id @default(uuid()) @db.Uuid
+  transactionId String   @db.Uuid
+  /// 몇 회차인지 (1부터)
+  round         Int
+  totalRounds   Int
+  /// 이번 회차 청구 금액 (원금 + 수수료)
+  amount        Int
+  /// 이번 회차 수수료
+  interest      Int      @default(0)
+  /// 청구 예정일 (카드 결제일 기준)
+  billingDate   DateTime
+  /// 청구서에 실제로 반영되었는지
+  isBilled      Boolean  @default(false)
+
+  statementId String? @db.Uuid
+
+  transaction Transaction    @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  statement   CardStatement? @relation(fields: [statementId], references: [id], onDelete: SetNull)
+
+  @@unique([transactionId, round])
+  @@index([billingDate])
+  @@map("installment_plans")
+}
+
+// ---------------------------------------------------------------------------
+// 고정 수입/지출
+// ---------------------------------------------------------------------------
+
+/// "매월 25일 신한카드 결제", "매월 10일 월급", "매월 30일 아파트 관리비" 같은 반복 규칙
+model RecurringRule {
+  id          String          @id @default(uuid()) @db.Uuid
+  householdId String          @db.Uuid
+  name        String //  "아파트 관리비"
+  kind        RecurringKind   @default(OTHER)
+  type        TransactionType @default(EXPENSE)
+
+  /// 예상 금액 (원)
+  amount           Int
+  /// 관리비처럼 매달 금액이 달라지는 항목이면 true -> 알림만 주고 금액은 직접 입력
+  isAmountVariable Boolean @default(false)
+
+  // --- 주기 ---
+  frequency    Frequency    @default(MONTHLY)
+  /// 매월 며칠 (1~31). 31 이면 말일로 보정
+  dayOfMonth   Int?
+  /// WEEKLY 일 때 요일 (0=일 ~ 6=토)
+  weekday      Int?
+  /// YEARLY 일 때 월 (1~12)
+  monthOfYear  Int?
+  /// 주말/공휴일 처리
+  dueDateShift DueDateShift @default(NONE)
+
+  // --- 결제 수단 ---
+  paymentMethod PaymentMethod @default(AUTO_DEBIT)
+  cardId        String?       @db.Uuid
+  accountId     String?       @db.Uuid
+  categoryId    String?       @db.Uuid
+
+  startDate        DateTime
+  endDate          DateTime?
+  isActive         Boolean   @default(true)
+  /// 예정일이 되면 거래를 자동으로 생성할지 (false 면 "확인" 눌러야 반영)
+  autoCreate       Boolean   @default(false)
+  /// 며칠 전에 알림을 줄지
+  notifyDaysBefore Int       @default(1)
+  memo             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  card      Card?     @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  account   Account?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  category  Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  occurrences  RecurringOccurrence[]
+  transactions Transaction[]
+
+  @@index([householdId, isActive])
+  @@map("recurring_rules")
+}
+
+/// 반복 규칙의 "이번 달 건". 납부 완료 체크 / 실제 금액 기록에 쓴다.
+model RecurringOccurrence {
+  id     String @id @default(uuid()) @db.Uuid
+  ruleId String @db.Uuid
+
+  /// 이번 회차 예정일
+  dueDate   DateTime
+  /// 어느 달 것인지 (예: "2026-08") - 조회 편의용
+  yearMonth String
+
+  expectedAmount Int
+  actualAmount   Int?
+  status         OccurrenceStatus @default(PENDING)
+  paidAt         DateTime?
+  memo           String?
+
+  /// 납부 완료 시 생성된 실제 거래
+  transactionId String? @unique @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rule        RecurringRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  transaction Transaction?  @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@unique([ruleId, yearMonth])
+  @@index([dueDate, status])
+  @@map("recurring_occurrences")
+}
+
+// ---------------------------------------------------------------------------
+// 카드 청구서 / 예산
+// ---------------------------------------------------------------------------
+
+/// 월별 카드 청구서. "이번 달 25일에 신한카드 얼마 나가는지" 를 보여주는 용도.
+model CardStatement {
+  id          String @id @default(uuid()) @db.Uuid
+  householdId String @db.Uuid
+  cardId      String @db.Uuid
+
+  /// 결제 기준 연월 ("2026-08")
+  yearMonth   String
+  /// 실제 출금일
+  billingDate DateTime
+  /// 이용 기간
+  periodStart DateTime
+  periodEnd   DateTime
+
+  /// 일시불 합계
+  lumpSumAmount     Int @default(0)
+  /// 이번 달 청구되는 할부 합계
+  installmentAmount Int @default(0)
+  /// 총 청구액
+  totalAmount       Int @default(0)
+
+  isPaid Boolean   @default(false)
+  paidAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  household    Household         @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  card         Card              @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  installments InstallmentPlan[]
+
+  @@unique([cardId, yearMonth])
+  @@index([householdId, yearMonth])
+  @@map("card_statements")
+}
+
+/// 월별 예산. categoryId 가 null 이면 그 달 전체 예산.
+model Budget {
+  id          String  @id @default(uuid()) @db.Uuid
+  householdId String  @db.Uuid
+  yearMonth   String //  "2026-08"
+  categoryId  String? @db.Uuid
+  amount      Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  category  Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, yearMonth, categoryId])
+  @@map("budgets")
+}

@@ -1,0 +1,379 @@
+import { prisma } from "@/lib/prisma";
+import { getOccurrenceDate, getStatementPeriod } from "@/lib/billing";
+import { dayOfMonthToDate, toYearMonth } from "@/lib/utils";
+
+/**
+ * 가계부 한 달의 실제 시작/끝.
+ * monthStartDay 가 25면 "2026-08" 은 7/25 00:00 ~ 8/24 23:59 를 뜻한다.
+ */
+export function getMonthRange(yearMonth: string, monthStartDay: number) {
+  const [year, month] = yearMonth.split("-").map(Number);
+
+  if (monthStartDay <= 1) {
+    const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const end = new Date(year, month, 0, 23, 59, 59, 999);
+    return { start, end };
+  }
+
+  const start = dayOfMonthToDate(year, month - 1 || 12, monthStartDay);
+  if (month === 1) start.setFullYear(year - 1);
+  start.setHours(0, 0, 0, 0);
+
+  const end = dayOfMonthToDate(year, month, monthStartDay);
+  end.setDate(end.getDate() - 1);
+  end.setHours(23, 59, 59, 999);
+
+  return { start, end };
+}
+
+export type MonthlySummary = Awaited<ReturnType<typeof getMonthlySummary>>;
+
+/** 한 달 수입/지출/남은돈 */
+export async function getMonthlySummary(
+  householdId: string,
+  yearMonth: string,
+  monthStartDay: number,
+) {
+  const { start, end } = getMonthRange(yearMonth, monthStartDay);
+
+  const grouped = await prisma.transaction.groupBy({
+    by: ["type"],
+    where: {
+      householdId,
+      occurredAt: { gte: start, lte: end },
+      excludeFromStats: false,
+    },
+    _sum: { amount: true },
+    _count: true,
+  });
+
+  const income =
+    grouped.find((row) => row.type === "INCOME")?._sum.amount ?? 0;
+  const expense =
+    grouped.find((row) => row.type === "EXPENSE")?._sum.amount ?? 0;
+  const count = grouped.reduce((sum, row) => sum + row._count, 0);
+
+  return {
+    yearMonth,
+    start,
+    end,
+    income,
+    expense,
+    balance: income - expense,
+    count,
+  };
+}
+
+/** 카테고리별 지출 (많은 순) */
+export async function getCategoryBreakdown(
+  householdId: string,
+  yearMonth: string,
+  monthStartDay: number,
+) {
+  const { start, end } = getMonthRange(yearMonth, monthStartDay);
+
+  const grouped = await prisma.transaction.groupBy({
+    by: ["categoryId"],
+    where: {
+      householdId,
+      type: "EXPENSE",
+      occurredAt: { gte: start, lte: end },
+      excludeFromStats: false,
+    },
+    _sum: { amount: true },
+  });
+
+  const categories = await prisma.category.findMany({
+    where: { householdId },
+    select: { id: true, name: true, icon: true, color: true },
+  });
+  const categoryMap = new Map(categories.map((c) => [c.id, c]));
+
+  const total = grouped.reduce((sum, row) => sum + (row._sum.amount ?? 0), 0);
+
+  return grouped
+    .map((row) => {
+      const category = row.categoryId ? categoryMap.get(row.categoryId) : null;
+      const amount = row._sum.amount ?? 0;
+
+      return {
+        categoryId: row.categoryId,
+        name: category?.name ?? "미분류",
+        icon: category?.icon ?? "❓",
+        color: category?.color ?? "#9ca3af",
+        amount,
+        ratio: total > 0 ? amount / total : 0,
+      };
+    })
+    .sort((a, b) => b.amount - a.amount);
+}
+
+export type CardBilling = Awaited<ReturnType<typeof getCardBillings>>[number];
+
+/**
+ * 카드별 이번 달 청구 예정액.
+ * 일시불과 할부를 나눠서 보여준다 — "이번 달 25일에 얼마 나가는지"가 핵심.
+ */
+export async function getCardBillings(householdId: string, yearMonth: string) {
+  const cards = await prisma.card.findMany({
+    where: { householdId, isActive: true },
+    include: {
+      ownerMember: { select: { displayName: true, color: true } },
+      paymentAccount: { select: { name: true, bankName: true } },
+    },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+  });
+
+  const [year, month] = yearMonth.split("-").map(Number);
+  const monthStart = new Date(year, month - 1, 1, 0, 0, 0, 0);
+  const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
+
+  // 이번 달에 청구되는 모든 회차를 한 번에 가져와서 카드별로 나눈다
+  const plans = await prisma.installmentPlan.findMany({
+    where: {
+      billingDate: { gte: monthStart, lte: monthEnd },
+      transaction: { householdId },
+    },
+    include: {
+      transaction: {
+        select: {
+          cardId: true,
+          merchant: true,
+          amount: true,
+          occurredAt: true,
+          installmentMonths: true,
+        },
+      },
+    },
+    orderBy: { billingDate: "asc" },
+  });
+
+  return cards.map((card) => {
+    const cardPlans = plans.filter((plan) => plan.transaction.cardId === card.id);
+
+    const lumpSum = cardPlans
+      .filter((plan) => plan.totalRounds === 1)
+      .reduce((sum, plan) => sum + plan.amount, 0);
+
+    const installment = cardPlans
+      .filter((plan) => plan.totalRounds > 1)
+      .reduce((sum, plan) => sum + plan.amount, 0);
+
+    const period = getStatementPeriod(card, yearMonth);
+
+    return {
+      card,
+      period,
+      lumpSum,
+      installment,
+      total: lumpSum + installment,
+      /** 진행 중인 할부 (남은 회차 표시용) */
+      ongoingInstallments: cardPlans
+        .filter((plan) => plan.totalRounds > 1)
+        .map((plan) => ({
+          id: plan.id,
+          merchant: plan.transaction.merchant ?? "할부 결제",
+          round: plan.round,
+          totalRounds: plan.totalRounds,
+          amount: plan.amount,
+          originalAmount: plan.transaction.amount,
+        })),
+    };
+  });
+}
+
+export type FixedScheduleItem = Awaited<
+  ReturnType<typeof getFixedSchedule>
+>[number];
+
+/**
+ * 이번 달 고정 수입/지출 일정.
+ * 규칙(RecurringRule)에서 이번 달 예정일을 계산하고,
+ * 이미 처리한 건(RecurringOccurrence)이 있으면 그 상태를 얹는다.
+ */
+export async function getFixedSchedule(
+  householdId: string,
+  yearMonth: string,
+) {
+  const rules = await prisma.recurringRule.findMany({
+    where: { householdId, isActive: true },
+    include: {
+      card: { select: { name: true, issuer: true, color: true, last4: true } },
+      account: { select: { name: true, bankName: true } },
+      category: { select: { name: true, icon: true, color: true } },
+      occurrences: { where: { yearMonth } },
+    },
+  });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return rules
+    .map((rule) => {
+      const dueDate = getOccurrenceDate({
+        yearMonth,
+        frequency: rule.frequency,
+        dayOfMonth: rule.dayOfMonth,
+        weekday: rule.weekday,
+        monthOfYear: rule.monthOfYear,
+        dueDateShift: rule.dueDateShift,
+      });
+
+      if (!dueDate) return null; //  이번 달에는 발생하지 않는 주기
+
+      const occurrence = rule.occurrences[0] ?? null;
+
+      const status =
+        occurrence?.status ??
+        (dueDate < today ? ("OVERDUE" as const) : ("PENDING" as const));
+
+      return {
+        rule,
+        dueDate,
+        occurrence,
+        status,
+        amount: occurrence?.actualAmount ?? rule.amount,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+    .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+}
+
+/** 거래 목록 (무한스크롤 없이 페이지 단위) */
+export async function getTransactions(
+  householdId: string,
+  {
+    yearMonth,
+    monthStartDay,
+    take = 100,
+    skip = 0,
+    type,
+    cardId,
+    categoryId,
+  }: {
+    yearMonth?: string;
+    monthStartDay: number;
+    take?: number;
+    skip?: number;
+    type?: "INCOME" | "EXPENSE" | "TRANSFER";
+    cardId?: string;
+    categoryId?: string;
+  },
+) {
+  const range = yearMonth ? getMonthRange(yearMonth, monthStartDay) : null;
+
+  return prisma.transaction.findMany({
+    where: {
+      householdId,
+      ...(range ? { occurredAt: { gte: range.start, lte: range.end } } : {}),
+      ...(type ? { type } : {}),
+      ...(cardId ? { cardId } : {}),
+      ...(categoryId ? { categoryId } : {}),
+    },
+    include: {
+      category: { select: { name: true, icon: true, color: true } },
+      card: { select: { name: true, issuer: true, color: true, last4: true } },
+      account: { select: { name: true, bankName: true } },
+      payer: { select: { displayName: true, color: true } },
+    },
+    orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
+    take,
+    skip,
+  });
+}
+
+/** 거래 등록 폼에서 쓰는 선택지 묶음 */
+export async function getFormOptions(householdId: string) {
+  const [categories, cards, accounts, members] = await Promise.all([
+    prisma.category.findMany({
+      where: { householdId, isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      select: { id: true, name: true, type: true, icon: true, color: true },
+    }),
+    prisma.card.findMany({
+      where: { householdId, isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        issuer: true,
+        type: true,
+        last4: true,
+        color: true,
+        billingDay: true,
+      },
+    }),
+    prisma.account.findMany({
+      where: { householdId, isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        bankName: true,
+        type: true,
+        balance: true,
+        color: true,
+      },
+    }),
+    prisma.householdMember.findMany({
+      where: { householdId },
+      orderBy: { joinedAt: "asc" },
+      select: {
+        id: true,
+        displayName: true,
+        color: true,
+        user: { select: { nickname: true, avatarUrl: true } },
+      },
+    }),
+  ]);
+
+  return { categories, cards, accounts, members };
+}
+
+/** 총 자산 (계좌 잔액 합) */
+export async function getTotalAssets(householdId: string) {
+  const result = await prisma.account.aggregate({
+    where: { householdId, isActive: true },
+    _sum: { balance: true },
+  });
+
+  return result._sum.balance ?? 0;
+}
+
+/** 다가오는 고정지출 (오늘 이후 7일 이내) — 홈 화면 알림용 */
+export async function getUpcomingFixed(householdId: string, days = 7) {
+  const yearMonth = toYearMonth(new Date());
+  const schedule = await getFixedSchedule(householdId, yearMonth);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const limit = new Date(today);
+  limit.setDate(limit.getDate() + days);
+
+  const thisMonth = schedule.filter(
+    (item) =>
+      item.status !== "PAID" &&
+      item.status !== "SKIPPED" &&
+      item.dueDate >= today &&
+      item.dueDate <= limit,
+  );
+
+  // 달을 넘어가는 구간(예: 말일에 다음 달 초 일정)도 함께 본다
+  if (limit.getMonth() !== today.getMonth()) {
+    const nextMonth = toYearMonth(limit);
+    const nextSchedule = await getFixedSchedule(householdId, nextMonth);
+
+    thisMonth.push(
+      ...nextSchedule.filter(
+        (item) =>
+          item.status !== "PAID" &&
+          item.status !== "SKIPPED" &&
+          item.dueDate >= today &&
+          item.dueDate <= limit,
+      ),
+    );
+  }
+
+  return thisMonth.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+}
