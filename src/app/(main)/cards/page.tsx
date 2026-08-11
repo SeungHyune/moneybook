@@ -86,7 +86,7 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
             />
           ) : (
             <ul className="space-y-2">
-              {billings.map(({ card, total, lumpSum, installment, period, ongoingInstallments }) => (
+              {billings.map(({ card, total, lumpSum, installment, period, ongoingInstallments, isCredit, monthlyUsage }) => (
                 <li
                   key={card.id}
                   className="overflow-hidden rounded-2xl border border-border bg-surface"
@@ -111,7 +111,13 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                       <p className="text-xs text-muted">
                         {CARD_TYPE_LABEL[card.type]}
                         {card.last4 && ` · ${card.last4}`}
-                        {card.billingDay && ` · 매월 ${card.billingDay}일 결제`}
+                        {isCredit && card.billingDay
+                          ? ` · 매월 ${card.billingDay}일 결제`
+                          : null}
+                        {/* 체크카드는 결제일 대신 어느 통장에서 빠지는지가 중요하다 */}
+                        {!isCredit && card.paymentAccount
+                          ? ` · ${card.paymentAccount.name} 즉시출금`
+                          : null}
                         {card.ownerMember?.displayName &&
                           ` · ${card.ownerMember.displayName}`}
                       </p>
@@ -119,16 +125,19 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
 
                     <div className="flex shrink-0 items-center gap-1">
                       <div className="text-right">
+                        {/* 신용카드는 청구 예정액, 체크·선불카드는 그 달 사용액 */}
                         <p className="tabular text-sm font-bold">
-                          {formatWon(total)}
+                          {formatWon(isCredit ? total : monthlyUsage)}
                         </p>
-                        {period && (
+                        {isCredit && period ? (
                           <p className="text-[10px] text-muted">
                             {period.periodStart.getMonth() + 1}/
                             {period.periodStart.getDate()} ~{" "}
                             {period.periodEnd.getMonth() + 1}/
                             {period.periodEnd.getDate()}
                           </p>
+                        ) : (
+                          <p className="text-[10px] text-muted">사용액</p>
                         )}
                       </div>
 
@@ -144,7 +153,7 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                     </div>
                   </div>
 
-                  {total > 0 && (
+                  {isCredit && total > 0 && (
                     <div className="grid grid-cols-2 gap-px border-t border-border bg-border">
                       <div className="bg-surface px-4 py-2.5">
                         <p className="text-[11px] text-muted">일시불</p>

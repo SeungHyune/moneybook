@@ -33,6 +33,7 @@ type Options = {
     last4: string | null;
     color: string;
     billingDay: number | null;
+    paymentAccountId: string | null;
   }[];
   accounts: {
     id: string;
@@ -101,6 +102,13 @@ export function TransactionForm({
   );
 
   const selectedCard = options.cards.find((card) => card.id === cardId);
+
+  // 체크카드에 연결된 출금 계좌 (있으면 결제 즉시 여기서 빠진다)
+  const linkedAccount = selectedCard?.paymentAccountId
+    ? options.accounts.find(
+        (account) => account.id === selectedCard.paymentAccountId,
+      )
+    : undefined;
 
   // 카드 결제인데 신용카드일 때만 할부를 물어본다 (체크카드는 할부가 없다)
   const canInstallment =
@@ -320,6 +328,25 @@ export function TransactionForm({
                 </Select>
               )}
             </Field>
+
+            {/*
+              체크카드는 긁는 즉시 연결 계좌에서 빠진다.
+              어느 통장에서 빠지는지 여기서 확인시켜 준다.
+            */}
+            {selectedCard?.type === "DEBIT" && (
+              <p
+                className={cn(
+                  "rounded-xl px-3 py-2.5 text-xs leading-relaxed",
+                  linkedAccount
+                    ? "bg-surface-muted text-muted"
+                    : "bg-warning/10 text-warning",
+                )}
+              >
+                {linkedAccount
+                  ? `결제하면 ${linkedAccount.bankName ? `${linkedAccount.bankName} ` : ""}${linkedAccount.name} 계좌에서 바로 빠져나갑니다. (현재 잔액 ${formatWon(linkedAccount.balance)})`
+                  : "연결 계좌가 없어서 계좌 잔액에는 반영되지 않아요. 카드/자산 화면에서 이 카드에 출금 계좌를 연결해 주세요."}
+              </p>
+            )}
 
             {canInstallment && (
               <div className="space-y-2">

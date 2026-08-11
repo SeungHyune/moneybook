@@ -349,6 +349,40 @@ function CardForm({
         </div>
       )}
 
+      {/*
+        체크카드는 결제일·이용기간이 없다. 대신 연결 계좌가 중요하다 —
+        긁는 즉시 이 계좌에서 잔액이 빠지도록 처리한다.
+      */}
+      {type === "DEBIT" && (
+        <div className="space-y-3 rounded-2xl border border-border bg-surface p-4">
+          <p className="text-sm font-bold">연결 계좌</p>
+
+          <Field
+            label="출금 계좌"
+            hint="이 카드로 결제하면 선택한 계좌에서 바로 빠져나갑니다."
+          >
+            <Select
+              name="paymentAccountId"
+              defaultValue={card?.paymentAccountId ?? ""}
+            >
+              <option value="">선택 안 함</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.bankName ? `${account.bankName} ` : ""}
+                  {account.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          {accounts.length === 0 && (
+            <p className="text-xs text-warning">
+              등록된 계좌가 없어요. 계좌를 먼저 등록하면 연결할 수 있습니다.
+            </p>
+          )}
+        </div>
+      )}
+
       <OwnerField
         owners={owners}
         isAdmin={isAdmin}

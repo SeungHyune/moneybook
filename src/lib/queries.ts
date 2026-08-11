@@ -128,25 +128,45 @@ export async function getCardBillings(householdId: string, yearMonth: string) {
   const monthStart = new Date(year, month - 1, 1, 0, 0, 0, 0);
   const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
 
-  // 이번 달에 청구되는 모든 회차를 한 번에 가져와서 카드별로 나눈다
-  const plans = await prisma.installmentPlan.findMany({
-    where: {
-      billingDate: { gte: monthStart, lte: monthEnd },
-      transaction: { householdId },
-    },
-    include: {
-      transaction: {
-        select: {
-          cardId: true,
-          merchant: true,
-          amount: true,
-          occurredAt: true,
-          installmentMonths: true,
+  /*
+   * 신용카드는 결제일에 한꺼번에 청구되므로 InstallmentPlan 을 합산한다.
+   * 체크/선불카드는 청구서가 없다 (긁는 즉시 계좌에서 빠지거나 충전액에서 빠진다).
+   * 그래서 그 카드들은 대신 "그 달에 얼마 썼는지"를 보여준다.
+   */
+  const [plans, usage] = await Promise.all([
+    prisma.installmentPlan.findMany({
+      where: {
+        billingDate: { gte: monthStart, lte: monthEnd },
+        transaction: { householdId },
+      },
+      include: {
+        transaction: {
+          select: {
+            cardId: true,
+            merchant: true,
+            amount: true,
+            occurredAt: true,
+            installmentMonths: true,
+          },
         },
       },
-    },
-    orderBy: { billingDate: "asc" },
-  });
+      orderBy: { billingDate: "asc" },
+    }),
+    prisma.transaction.groupBy({
+      by: ["cardId"],
+      where: {
+        householdId,
+        type: "EXPENSE",
+        cardId: { not: null },
+        occurredAt: { gte: monthStart, lte: monthEnd },
+      },
+      _sum: { amount: true },
+    }),
+  ]);
+
+  const usageByCard = new Map(
+    usage.map((row) => [row.cardId, row._sum.amount ?? 0]),
+  );
 
   return cards.map((card) => {
     const cardPlans = plans.filter((plan) => plan.transaction.cardId === card.id);
@@ -160,13 +180,18 @@ export async function getCardBillings(householdId: string, yearMonth: string) {
       .reduce((sum, plan) => sum + plan.amount, 0);
 
     const period = getStatementPeriod(card, yearMonth);
+    const isCredit = card.type === "CREDIT";
 
     return {
       card,
       period,
+      /** 신용카드 여부. false 면 청구서 대신 monthlyUsage 를 보여준다 */
+      isCredit,
       lumpSum,
       installment,
       total: lumpSum + installment,
+      /** 그 달에 이 카드로 결제한 총액 (체크/선불카드 표시용) */
+      monthlyUsage: usageByCard.get(card.id) ?? 0,
       /** 진행 중인 할부 (남은 회차 표시용) */
       ongoingInstallments: cardPlans
         .filter((plan) => plan.totalRounds > 1)
@@ -301,6 +326,8 @@ export async function getFormOptions(householdId: string) {
         last4: true,
         color: true,
         billingDay: true,
+        // 체크카드는 결제 즉시 이 계좌에서 빠진다
+        paymentAccountId: true,
       },
     }),
     prisma.account.findMany({

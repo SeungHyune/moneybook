@@ -274,7 +274,9 @@ model Card {
   statementStartDay Int?
   /// 이용기간 종료일. 예: 11 -> 당월 11일까지
   statementEndDay   Int?
-  /// 카드값이 빠져나가는 결제 계좌
+  /// 이 카드에 연결된 계좌.
+  /// - 신용카드: 결제일에 카드대금이 빠져나가는 계좌
+  /// - 체크카드: 결제 즉시 잔액이 빠지는 계좌 (거래 등록 시 바로 차감한다)
   paymentAccountId  String? @db.Uuid
   /// 신용 한도 (원)
   creditLimit       Int?

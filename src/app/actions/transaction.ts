@@ -82,14 +82,46 @@ export async function createTransaction(
   const { member } = await requireMembership(data.householdId, "MEMBER");
 
   const cardId = nullify(data.cardId);
-  const accountId = nullify(data.accountId);
   const toAccountId = nullify(data.toAccountId);
 
   // 카드 결제가 아니면 할부는 의미가 없다
-  const installmentMonths =
+  const requestedInstallments =
     data.paymentMethod === "CARD" || data.paymentMethod === "MOBILE_PAY"
       ? data.installmentMonths
       : 1;
+
+  // 카드 종류에 따라 처리가 갈리므로 트랜잭션 밖에서 먼저 읽는다
+  const card = cardId
+    ? await prisma.card.findFirst({
+        where: { id: cardId, householdId: data.householdId },
+      })
+    : null;
+
+  /*
+   * 카드 종류별 처리
+   *
+   *   신용(CREDIT) : 결제일에 한꺼번에 빠진다 → 회차 스케줄만 만들고 계좌는 그대로
+   *   체크(DEBIT)  : 긁는 즉시 연결 계좌에서 빠진다 → 계좌를 깎고 청구서는 만들지 않는다
+   *   선불(PREPAID): 미리 충전한 금액에서 빠진다 → 계좌·청구 모두 건드리지 않는다
+   *
+   * 체크카드는 실제로 빠져나간 계좌를 accountId 에 기록해 둔다.
+   * 그러면 잔액 반영/원복이 "거래에 적힌 계좌"만 보고 처리돼서 어긋나지 않고,
+   * 내역에서도 어느 통장에서 나갔는지 보여줄 수 있다.
+   */
+  const isCreditCard = card?.type === "CREDIT";
+  const isDebitCard = card?.type === "DEBIT";
+  const isPrepaidCard = card?.type === "PREPAID";
+
+  const installmentMonths = isCreditCard ? requestedInstallments : 1;
+
+  let accountId = nullify(data.accountId);
+  if (isDebitCard) {
+    // 연결 계좌가 없으면 사용자가 고른 계좌라도 쓴다
+    accountId = card?.paymentAccountId ?? accountId;
+  } else if (isCreditCard || isPrepaidCard) {
+    // 즉시 출금이 아니므로 계좌를 물리지 않는다
+    accountId = null;
+  }
 
   await prisma.$transaction(async (tx) => {
     const created = await tx.transaction.create({
@@ -116,35 +148,31 @@ export async function createTransaction(
       },
     });
 
-    // 카드 결제면 회차별 청구 스케줄을 만들어 둔다.
+    // 신용카드만 청구 스케줄을 만든다.
     // 일시불도 1회차짜리로 남겨야 "이번 달 카드값"을 한 번에 계산할 수 있다.
-    if (cardId && data.type === "EXPENSE") {
-      const card = await tx.card.findUnique({ where: { id: cardId } });
+    if (card && isCreditCard && data.type === "EXPENSE") {
+      const rounds = buildInstallmentSchedule({
+        amount: data.amount,
+        months: installmentMonths,
+        purchaseDate: data.occurredAt,
+        card,
+        interestAmount: data.isInterestFree ? 0 : data.interestAmount,
+      });
 
-      if (card) {
-        const rounds = buildInstallmentSchedule({
-          amount: data.amount,
-          months: installmentMonths,
-          purchaseDate: data.occurredAt,
-          card,
-          interestAmount: data.isInterestFree ? 0 : data.interestAmount,
-        });
-
-        await tx.installmentPlan.createMany({
-          data: rounds.map((round) => ({
-            transactionId: created.id,
-            round: round.round,
-            totalRounds: round.totalRounds,
-            amount: round.amount,
-            interest: round.interest,
-            billingDate: round.billingDate,
-          })),
-        });
-      }
+      await tx.installmentPlan.createMany({
+        data: rounds.map((round) => ({
+          transactionId: created.id,
+          round: round.round,
+          totalRounds: round.totalRounds,
+          amount: round.amount,
+          interest: round.interest,
+          billingDate: round.billingDate,
+        })),
+      });
     }
 
-    // 현금/계좌에서 바로 나가는 건은 잔액에 즉시 반영한다.
-    // (카드 결제는 나중에 카드값이 빠져나갈 때 반영)
+    // accountId 가 남아 있으면 그 계좌에서 즉시 빠지는(또는 들어오는) 건이다.
+    // 신용/선불카드는 위에서 accountId 를 비웠으므로 여기 걸리지 않는다.
     if (data.type === "TRANSFER") {
       if (accountId) {
         await tx.account.update({
@@ -158,7 +186,7 @@ export async function createTransaction(
           data: { balance: { increment: data.amount } },
         });
       }
-    } else if (accountId && data.paymentMethod !== "CARD") {
+    } else if (accountId) {
       await tx.account.update({
         where: { id: accountId },
         data:
@@ -181,8 +209,22 @@ export async function deleteTransaction(transactionId: string) {
 
   await requireMembership(transaction.householdId, "MEMBER");
 
+  /*
+   * 등록할 때 잔액을 깎았던 건만 되돌린다.
+   * 신용/선불카드 결제는 계좌를 건드리지 않았으므로 원복 대상이 아니다.
+   * (등록 시 accountId 를 비워두지만, 이 규칙이 바뀌기 전에 쌓인 데이터도
+   *  있을 수 있어 카드 종류를 한 번 더 확인한다)
+   */
+  const card = transaction.cardId
+    ? await prisma.card.findUnique({
+        where: { id: transaction.cardId },
+        select: { type: true },
+      })
+    : null;
+
+  const wasImmediateWithdrawal = !card || card.type === "DEBIT";
+
   await prisma.$transaction(async (tx) => {
-    // 잔액 원복
     if (transaction.type === "TRANSFER") {
       if (transaction.accountId) {
         await tx.account.update({
@@ -196,10 +238,7 @@ export async function deleteTransaction(transactionId: string) {
           data: { balance: { decrement: transaction.amount } },
         });
       }
-    } else if (
-      transaction.accountId &&
-      transaction.paymentMethod !== "CARD"
-    ) {
+    } else if (transaction.accountId && wasImmediateWithdrawal) {
       await tx.account.update({
         where: { id: transaction.accountId },
         data:
