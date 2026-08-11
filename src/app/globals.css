@@ -35,8 +35,21 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/*
+ * 다크 팔레트.
+ *
+ * 테마는 세 가지 상태다 — 시스템 따름(기본) / 라이트 고정 / 다크 고정.
+ * 사용자가 고른 값은 html[data-theme] 에 찍히고 localStorage 에 남는다.
+ * (layout.tsx 의 인라인 스크립트가 첫 페인트 전에 적용해서 깜빡임이 없다)
+ *
+ *   - 시스템이 다크 + 사용자가 라이트를 고르지 않았다 → 다크
+ *   - 사용자가 다크를 골랐다 → 시스템과 무관하게 다크
+ *
+ * 두 블록에 같은 값을 쓰는 게 중복처럼 보이지만, CSS 로 이 두 조건을
+ * 하나로 묶을 방법이 없다. 색을 바꿀 때는 아래 두 곳을 함께 고쳐야 한다.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --background: #0e0f13;
     --surface: #191b21;
     --surface-muted: #23262e;
@@ -54,6 +67,25 @@
     --warning: #f0a742;
     --success: #4ade80;
   }
+}
+
+:root[data-theme="dark"] {
+  --background: #0e0f13;
+  --surface: #191b21;
+  --surface-muted: #23262e;
+  --foreground: #f2f3f5;
+  --muted: #9aa1ae;
+  --border: #2c2f38;
+
+  --primary: #6b85ff;
+  --primary-foreground: #0e0f13;
+
+  --income: #63a4ff;
+  --expense: #ff7085;
+  --transfer: #8d95a5;
+
+  --warning: #f0a742;
+  --success: #4ade80;
 }
 
 @theme inline {

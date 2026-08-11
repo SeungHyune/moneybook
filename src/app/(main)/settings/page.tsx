@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ChevronRight, LogOut, Users } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { HouseholdSettingsForm } from "@/components/household-settings-form";
+import { ThemeSelector } from "@/components/theme-selector";
 import { requireHouseholdContext } from "@/lib/auth";
 import { MEMBER_ROLE_LABEL } from "@/lib/labels";
 
@@ -59,6 +60,9 @@ export default async function SettingsPage() {
           </div>
           <ChevronRight className="size-5 shrink-0 text-muted" />
         </Link>
+
+        {/* 화면 테마 */}
+        <ThemeSelector />
 
         {/* 가계부 설정 */}
         <HouseholdSettingsForm

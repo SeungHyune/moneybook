@@ -106,6 +106,36 @@ export function hasRole(role: MemberRole, required: MemberRole) {
 }
 
 /**
+ * 카드/계좌를 수정·삭제할 수 있는지.
+ *
+ * - ADMIN/OWNER : 누가 등록한 것이든 전부
+ * - MEMBER      : 자기가 등록한 것만
+ * - VIEWER      : 불가
+ */
+export function canManageAsset(
+  member: { id: string; role: MemberRole },
+  asset: { createdByMemberId: string | null },
+) {
+  if (member.role === "VIEWER") return false;
+  if (hasRole(member.role, "ADMIN")) return true;
+  return asset.createdByMemberId === member.id;
+}
+
+/**
+ * 카드/계좌를 등록할 때 "누구 것"으로 지정할 수 있는지.
+ *
+ * 구성원은 본인 또는 공용(null)만 고를 수 있고,
+ * 관리자는 아무 구성원이나 지정할 수 있다.
+ */
+export function canAssignOwner(
+  member: { id: string; role: MemberRole },
+  ownerMemberId: string | null,
+) {
+  if (hasRole(member.role, "ADMIN")) return true;
+  return ownerMemberId === null || ownerMemberId === member.id;
+}
+
+/**
  * 서버 액션에서 쓰는 권한 체크.
  * Prisma 는 Supabase RLS 를 우회하므로(서비스 커넥션으로 붙는다)
  * 가구 데이터에 손대기 전에 반드시 이 함수를 거쳐야 한다.

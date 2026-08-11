@@ -48,6 +48,19 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="ko" className="h-full antialiased">
+      <head>
+        {/*
+          첫 페인트 전에 저장된 테마를 적용한다. 이게 없으면 라이트로 한 번
+          그려진 뒤 다크로 바뀌면서 화면이 번쩍인다.
+          쿠키 대신 localStorage 를 쓰는 이유: 쿠키를 읽으면 layout 이 동적 렌더가 되어
+          /login, /offline 같은 정적 페이지까지 매 요청 서버를 타게 된다.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem("theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}`,
+          }}
+        />
+      </head>
       <body className="app-backdrop">
         {/*
           앱 셸. 모바일에서는 화면을 꽉 채우고,

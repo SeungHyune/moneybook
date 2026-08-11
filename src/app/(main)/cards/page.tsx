@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Pencil, Plus } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { MonthSwitcher } from "@/components/month-switcher";
-import { requireHouseholdContext } from "@/lib/auth";
+import { canManageAsset, requireHouseholdContext } from "@/lib/auth";
 import { getCardBillings, getFormOptions, getTotalAssets } from "@/lib/queries";
 import { ACCOUNT_TYPE_LABEL, CARD_TYPE_LABEL } from "@/lib/labels";
 import { formatWon, toYearMonth } from "@/lib/utils";
@@ -10,8 +10,11 @@ import { formatWon, toYearMonth } from "@/lib/utils";
 export const metadata = { title: "카드/자산" };
 
 export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
-  const { household } = await requireHouseholdContext();
+  const { household, member } = await requireHouseholdContext();
   const params = await searchParams;
+
+  // 수정 권한이 없는 항목에 직접 접근했을 때 돌아오는 표시
+  const forbidden = params.error === "forbidden";
 
   const monthParam = params.month;
   const yearMonth =
@@ -44,6 +47,15 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
 
       <div className="space-y-4 px-4 py-4">
         <MonthSwitcher yearMonth={yearMonth} />
+
+        {forbidden && (
+          <p
+            className="rounded-xl bg-expense/10 px-4 py-3 text-center text-sm text-expense"
+            role="alert"
+          >
+            본인이 등록한 항목만 수정할 수 있어요.
+          </p>
+        )}
 
         <section className="rounded-2xl border border-border bg-surface p-4">
           <div className="flex items-center justify-between">
@@ -105,17 +117,29 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                       </p>
                     </div>
 
-                    <div className="shrink-0 text-right">
-                      <p className="tabular text-sm font-bold">
-                        {formatWon(total)}
-                      </p>
-                      {period && (
-                        <p className="text-[10px] text-muted">
-                          {period.periodStart.getMonth() + 1}/
-                          {period.periodStart.getDate()} ~{" "}
-                          {period.periodEnd.getMonth() + 1}/
-                          {period.periodEnd.getDate()}
+                    <div className="flex shrink-0 items-center gap-1">
+                      <div className="text-right">
+                        <p className="tabular text-sm font-bold">
+                          {formatWon(total)}
                         </p>
+                        {period && (
+                          <p className="text-[10px] text-muted">
+                            {period.periodStart.getMonth() + 1}/
+                            {period.periodStart.getDate()} ~{" "}
+                            {period.periodEnd.getMonth() + 1}/
+                            {period.periodEnd.getDate()}
+                          </p>
+                        )}
+                      </div>
+
+                      {canManageAsset(member, card) && (
+                        <Link
+                          href={`/cards/${card.id}/edit`}
+                          aria-label={`${card.name} 수정`}
+                          className="flex size-8 items-center justify-center rounded-full text-muted transition active:bg-surface-muted"
+                        >
+                          <Pencil className="size-4" />
+                        </Link>
                       )}
                     </div>
                   </div>
@@ -195,12 +219,22 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                     </p>
                   </div>
                   <span
-                    className={`tabular text-sm font-bold ${
+                    className={`tabular shrink-0 text-sm font-bold ${
                       account.balance < 0 ? "text-expense" : ""
                     }`}
                   >
                     {formatWon(account.balance)}
                   </span>
+
+                  {canManageAsset(member, account) && (
+                    <Link
+                      href={`/accounts/${account.id}/edit`}
+                      aria-label={`${account.name} 수정`}
+                      className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition active:bg-surface-muted"
+                    >
+                      <Pencil className="size-4" />
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>

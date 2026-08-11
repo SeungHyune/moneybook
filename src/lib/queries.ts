@@ -313,6 +313,10 @@ export async function getFormOptions(householdId: string) {
         type: true,
         balance: true,
         color: true,
+        last4: true,
+        // 수정 권한 판단에 필요 (canManageAsset)
+        ownerMemberId: true,
+        createdByMemberId: true,
       },
     }),
     prisma.householdMember.findMany({
@@ -322,6 +326,7 @@ export async function getFormOptions(householdId: string) {
         id: true,
         displayName: true,
         color: true,
+        role: true,
         user: { select: { nickname: true, avatarUrl: true } },
       },
     }),

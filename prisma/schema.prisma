@@ -174,10 +174,12 @@ model HouseholdMember {
   household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  ownedAccounts Account[]     @relation("AccountOwner")
-  ownedCards    Card[]        @relation("CardOwner")
-  createdTx     Transaction[] @relation("TxCreatedBy")
-  paidTx        Transaction[] @relation("TxPaidBy")
+  ownedAccounts   Account[]     @relation("AccountOwner")
+  ownedCards      Card[]        @relation("CardOwner")
+  createdAccounts Account[]     @relation("AccountCreatedBy")
+  createdCards    Card[]        @relation("CardCreatedBy")
+  createdTx       Transaction[] @relation("TxCreatedBy")
+  paidTx          Transaction[] @relation("TxPaidBy")
 
   @@unique([householdId, userId])
   @@index([userId])
@@ -229,13 +231,16 @@ model Account {
   sortOrder   Int         @default(0)
   memo        String?
 
-  ownerMemberId String? @db.Uuid
+  ownerMemberId     String? @db.Uuid
+  /// 이 계좌를 등록한 사람. 구성원(MEMBER)은 자기가 등록한 것만 수정할 수 있다.
+  createdByMemberId String? @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   household   Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
   ownerMember HouseholdMember? @relation("AccountOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
+  createdBy   HouseholdMember? @relation("AccountCreatedBy", fields: [createdByMemberId], references: [id], onDelete: SetNull)
 
   transactions   Transaction[]   @relation("TxAccount")
   incomingTx     Transaction[]   @relation("TxToAccount")
@@ -258,7 +263,9 @@ model Card {
   sortOrder   Int      @default(0)
 
   /// 이 카드 주인 (부부 중 누구 카드인지)
-  ownerMemberId String? @db.Uuid
+  ownerMemberId     String? @db.Uuid
+  /// 이 카드를 등록한 사람. 구성원(MEMBER)은 자기가 등록한 것만 수정할 수 있다.
+  createdByMemberId String? @db.Uuid
 
   // --- 신용카드 청구 주기 ---
   /// 결제일. 매월 며칠에 카드값이 빠져나가는지 (예: 25)
@@ -277,6 +284,7 @@ model Card {
 
   household      Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
   ownerMember    HouseholdMember? @relation("CardOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
+  createdBy      HouseholdMember? @relation("CardCreatedBy", fields: [createdByMemberId], references: [id], onDelete: SetNull)
   paymentAccount Account?         @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
 
   transactions   Transaction[]

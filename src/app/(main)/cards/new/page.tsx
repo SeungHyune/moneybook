@@ -7,7 +7,7 @@ export const metadata = { title: "카드/계좌 등록" };
 export default async function NewAssetPage({
   searchParams,
 }: PageProps<"/cards/new">) {
-  const { household } = await requireHouseholdContext();
+  const { household, member } = await requireHouseholdContext();
   const options = await getFormOptions(household.id);
 
   const params = await searchParams;
@@ -18,6 +18,7 @@ export default async function NewAssetPage({
       householdId={household.id}
       members={options.members}
       accounts={options.accounts}
+      currentMember={{ id: member.id, role: member.role }}
       defaultTab={defaultTab}
     />
   );
