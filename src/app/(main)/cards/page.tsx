@@ -4,7 +4,12 @@ import { AppHeader } from "@/components/app-header";
 import { CardStatementActions } from "@/components/card-statement-actions";
 import { MonthSwitcher } from "@/components/month-switcher";
 import { canManageAsset, requireHouseholdContext } from "@/lib/auth";
-import { getCardBillings, getFormOptions, getTotalAssets } from "@/lib/queries";
+import {
+  getCardBillings,
+  getFormOptions,
+  getTotalAssets,
+  getUpcomingCardPayments,
+} from "@/lib/queries";
 import { ACCOUNT_TYPE_LABEL, CARD_TYPE_LABEL } from "@/lib/labels";
 import { formatWon, toYearMonth } from "@/lib/utils";
 
@@ -23,13 +28,21 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
       ? monthParam
       : toYearMonth(new Date());
 
-  const [billings, options, totalAssets] = await Promise.all([
+  const [billings, upcomingPayments, options, totalAssets] = await Promise.all([
     getCardBillings(household.id, yearMonth),
+    // 신용카드는 "고른 달"이 아니라 "다음 결제일" 기준으로 보여준다
+    getUpcomingCardPayments(household.id),
     getFormOptions(household.id),
     getTotalAssets(household.id),
   ]);
 
-  const totalBilling = billings.reduce((sum, item) => sum + item.total, 0);
+  const upcomingByCard = new Map(
+    upcomingPayments.map((item) => [item.card.id, item]),
+  );
+
+  const totalUpcoming = upcomingPayments
+    .filter((item) => !item.statement?.isPaid)
+    .reduce((sum, item) => sum + item.total, 0);
 
   return (
     <>
@@ -66,11 +79,9 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
             </span>
           </div>
           <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
-            <span className="text-sm text-muted">
-              {Number(yearMonth.split("-")[1])}월 카드 청구 예정
-            </span>
+            <span className="text-sm text-muted">다음 결제 예정</span>
             <span className="tabular text-lg font-bold text-expense">
-              {formatWon(totalBilling)}
+              {formatWon(totalUpcoming)}
             </span>
           </div>
         </section>
@@ -87,7 +98,22 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
             />
           ) : (
             <ul className="space-y-2">
-              {billings.map(({ card, total, lumpSum, installment, period, ongoingInstallments, isCredit, monthlyUsage, statement }) => (
+              {billings.map((item) => {
+                const { card, ongoingInstallments, isCredit, monthlyUsage } = item;
+
+                /*
+                 * 신용카드는 고른 달이 아니라 "아직 오지 않은 결제일" 기준으로 본다.
+                 * 오늘이 8/13 이고 결제일이 5일이면 8/5 는 지났으니 9/5 를 가리키고,
+                 * 이용기간도 그 9/5 기준(7/22~8/21)이 된다.
+                 */
+                const upcoming = isCredit ? upcomingByCard.get(card.id) : undefined;
+                const period = upcoming?.period ?? null;
+                const total = upcoming?.total ?? 0;
+                const lumpSum = upcoming?.lumpSum ?? 0;
+                const installment = upcoming?.installment ?? 0;
+                const statement = upcoming?.statement ?? null;
+
+                return (
                 <li
                   key={card.id}
                   className="overflow-hidden rounded-2xl border border-border bg-surface"
@@ -131,14 +157,25 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                           {formatWon(isCredit ? total : monthlyUsage)}
                         </p>
                         {isCredit && period ? (
-                          <p className="text-[10px] text-muted">
-                            {period.periodStart.getMonth() + 1}/
-                            {period.periodStart.getDate()} ~{" "}
-                            {period.periodEnd.getMonth() + 1}/
-                            {period.periodEnd.getDate()} 사용분
-                          </p>
+                          <>
+                            <p className="text-[10px] text-muted">
+                              {period.billingDate.getMonth() + 1}/
+                              {period.billingDate.getDate()} 결제
+                              {upcoming && upcoming.dday >= 0
+                                ? ` · D-${upcoming.dday}`
+                                : ""}
+                            </p>
+                            <p className="text-[10px] text-muted">
+                              {period.periodStart.getMonth() + 1}/
+                              {period.periodStart.getDate()} ~{" "}
+                              {period.periodEnd.getMonth() + 1}/
+                              {period.periodEnd.getDate()} 사용분
+                            </p>
+                          </>
                         ) : (
-                          <p className="text-[10px] text-muted">사용액</p>
+                          <p className="text-[10px] text-muted">
+                            {Number(yearMonth.split("-")[1])}월 사용액
+                          </p>
                         )}
                       </div>
 
@@ -192,11 +229,14 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                     </ul>
                   )}
 
-                  {/* 결제일에 통장에서 빠지는 처리 (신용카드만) */}
-                  {isCredit && (total > 0 || statement?.isPaid) && (
+                  {/*
+                    결제일에 통장에서 빠지는 처리 (신용카드만).
+                    대상은 고른 달이 아니라 다음 결제 예정월이다.
+                  */}
+                  {isCredit && period && (total > 0 || statement?.isPaid) && (
                     <CardStatementActions
                       cardId={card.id}
-                      yearMonth={yearMonth}
+                      yearMonth={period.yearMonth}
                       amount={total}
                       accountName={card.paymentAccount?.name ?? null}
                       hasAccount={Boolean(card.paymentAccountId)}
@@ -205,7 +245,8 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                     />
                   )}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </section>

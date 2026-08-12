@@ -1,5 +1,10 @@
 import { prisma } from "@/lib/prisma";
-import { getOccurrenceDate, getStatementPeriod } from "@/lib/billing";
+import {
+  getOccurrenceDate,
+  getStatementPeriod,
+  getUpcomingStatementPeriod,
+  type StatementPeriod,
+} from "@/lib/billing";
 import { dayOfMonthToDate, toYearMonth } from "@/lib/utils";
 
 /**
@@ -212,6 +217,122 @@ export async function getCardBillings(householdId: string, yearMonth: string) {
           amount: plan.amount,
           originalAmount: plan.transaction.amount,
         })),
+    };
+  });
+}
+
+export type UpcomingCardPayment = Awaited<
+  ReturnType<typeof getUpcomingCardPayments>
+>[number];
+
+/**
+ * 카드별 "다음에 낼 카드값".
+ *
+ * 달을 골라서 보는 getCardBillings 와 달리, 오늘 기준으로 아직 오지 않은
+ * 결제일을 카드마다 따로 계산한다. 결제일이 5일인 카드와 25일인 카드는
+ * 같은 날에도 서로 다른 달의 청구서를 기다리고 있기 때문이다.
+ */
+export async function getUpcomingCardPayments(householdId: string) {
+  const cards = await prisma.card.findMany({
+    where: {
+      householdId,
+      isActive: true,
+      type: "CREDIT",
+      billingDay: { not: null },
+    },
+    include: {
+      ownerMember: { select: { displayName: true } },
+      paymentAccount: { select: { name: true, bankName: true } },
+    },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+  });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const targets = cards
+    .map((card) => ({
+      card,
+      period: getUpcomingStatementPeriod(card, today),
+    }))
+    .filter(
+      (item): item is { card: (typeof cards)[number]; period: StatementPeriod } =>
+        item.period !== null,
+    );
+
+  if (targets.length === 0) return [];
+
+  // 카드마다 결제 달이 다를 수 있으니, 전체를 덮는 범위로 한 번만 조회한다
+  const times = targets.map((item) => item.period.billingDate.getTime());
+  const earliest = new Date(Math.min(...times));
+  const latest = new Date(Math.max(...times));
+
+  const rangeStart = new Date(earliest.getFullYear(), earliest.getMonth(), 1);
+  const rangeEnd = new Date(
+    latest.getFullYear(),
+    latest.getMonth() + 1,
+    0,
+    23,
+    59,
+    59,
+    999,
+  );
+
+  const [plans, statements] = await Promise.all([
+    prisma.installmentPlan.findMany({
+      where: {
+        billingDate: { gte: rangeStart, lte: rangeEnd },
+        transaction: { householdId },
+      },
+      include: {
+        transaction: { select: { cardId: true, merchant: true } },
+      },
+      orderBy: { billingDate: "asc" },
+    }),
+    prisma.cardStatement.findMany({
+      where: {
+        householdId,
+        yearMonth: { in: targets.map((item) => item.period.yearMonth) },
+      },
+    }),
+  ]);
+
+  return targets.map(({ card, period }) => {
+    // 그 카드의, 그 결제월에 청구되는 회차만 모은다
+    const cardPlans = plans.filter(
+      (plan) =>
+        plan.transaction.cardId === card.id &&
+        toYearMonth(plan.billingDate) === period.yearMonth,
+    );
+
+    const lumpSum = cardPlans
+      .filter((plan) => plan.totalRounds === 1)
+      .reduce((sum, plan) => sum + plan.amount, 0);
+    const installment = cardPlans
+      .filter((plan) => plan.totalRounds > 1)
+      .reduce((sum, plan) => sum + plan.amount, 0);
+
+    const statement =
+      statements.find(
+        (row) => row.cardId === card.id && row.yearMonth === period.yearMonth,
+      ) ?? null;
+
+    return {
+      card,
+      period,
+      lumpSum,
+      installment,
+      total: lumpSum + installment,
+      statement,
+      dday: Math.round(
+        (new Date(
+          period.billingDate.getFullYear(),
+          period.billingDate.getMonth(),
+          period.billingDate.getDate(),
+        ).getTime() -
+          today.getTime()) /
+          86_400_000,
+      ),
     };
   });
 }

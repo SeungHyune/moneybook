@@ -69,6 +69,34 @@ export function getStatementPeriod(
 }
 
 /**
+ * 아직 오지 않은, 가장 가까운 결제일의 청구서를 찾는다.
+ *
+ * 오늘이 8/13 이고 결제일이 5일이면 8/5 는 이미 지났으므로 9/5 를 가리킨다.
+ * 이용기간도 그 9/5 기준으로 계산되므로 7/22 ~ 8/21 이 된다.
+ *
+ * 결제일 당일은 "아직 안 지난 것"으로 본다 — 그날 낮에 빠지는 경우가 많아서다.
+ */
+export function getUpcomingStatementPeriod(
+  card: BillingCardConfig,
+  today: Date = new Date(),
+): StatementPeriod | null {
+  if (!card.billingDay) return null;
+
+  const from = new Date(today);
+  from.setHours(0, 0, 0, 0);
+
+  // 이번 달부터 훑는다. 말일 보정(31일 -> 30일) 때문에 두 달까지 넉넉히 본다.
+  for (let offset = 0; offset <= 2; offset++) {
+    const probe = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+    const period = getStatementPeriod(card, toYearMonth(probe));
+
+    if (period && period.billingDate >= from) return period;
+  }
+
+  return null;
+}
+
+/**
  * 이 날짜에 긁은 카드 결제가 "몇 월 청구서"에 잡히는지 찾는다.
  * 구매일 기준 당월/익월/익익월 청구서를 순서대로 확인한다.
  */

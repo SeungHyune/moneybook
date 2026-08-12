@@ -10,10 +10,10 @@ import {
 } from "@/components/ui/skeleton";
 import { requireHouseholdContext } from "@/lib/auth";
 import {
-  getCardBillings,
   getCategoryBreakdown,
   getMonthlySummary,
   getTransactions,
+  getUpcomingCardPayments,
   getUpcomingFixed,
 } from "@/lib/queries";
 import { RECURRING_KIND_META } from "@/lib/labels";
@@ -64,10 +64,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
         </Suspense>
 
         <Suspense fallback={<SectionSkeleton rows={2} />}>
-          <CardBillingSection
-            householdId={householdId}
-            yearMonth={yearMonth}
-          />
+          <CardBillingSection householdId={householdId} />
         </Suspense>
 
         <Suspense fallback={<SectionSkeleton rows={4} />}>
@@ -198,21 +195,23 @@ async function UpcomingSection({ householdId }: { householdId: string }) {
   );
 }
 
-async function CardBillingSection({
-  householdId,
-  yearMonth,
-}: {
-  householdId: string;
-  yearMonth: string;
-}) {
-  const billings = await getCardBillings(householdId, yearMonth);
+/**
+ * 다가오는 카드 결제.
+ *
+ * 월 선택과 무관하게 "오늘 이후 가장 가까운 결제일"을 카드마다 따로 계산한다.
+ * 결제일이 5일인 카드와 25일인 카드는 같은 날에도 기다리는 청구서가 다르다.
+ */
+async function CardBillingSection({ householdId }: { householdId: string }) {
+  const payments = await getUpcomingCardPayments(householdId);
 
-  const withAmount = billings.filter((item) => item.total > 0);
-  const totalBilling = withAmount.reduce((sum, item) => sum + item.total, 0);
+  const pending = payments.filter(
+    (item) => item.total > 0 && !item.statement?.isPaid,
+  );
+  const totalBilling = pending.reduce((sum, item) => sum + item.total, 0);
 
   return (
     <SectionCard
-      title={`${Number(yearMonth.split("-")[1])}월 카드값`}
+      title="다가오는 카드 결제"
       icon={<CreditCard className="size-4" />}
       href="/cards"
       trailing={
@@ -223,15 +222,15 @@ async function CardBillingSection({
         ) : undefined
       }
     >
-      {withAmount.length === 0 ? (
+      {pending.length === 0 ? (
         <EmptyHint
-          message="이번 달 청구 예정인 카드값이 없어요."
+          message="결제 예정인 카드값이 없어요."
           actionLabel="카드 등록하기"
           href="/cards/new"
         />
       ) : (
         <ul className="space-y-3">
-          {withAmount.map(({ card, total, installment, period }) => (
+          {pending.map(({ card, total, installment, period, dday }) => (
             <li key={card.id} className="flex items-center gap-3">
               <span
                 className="h-9 w-1.5 shrink-0 rounded-full"
@@ -241,15 +240,25 @@ async function CardBillingSection({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{card.name}</p>
                 <p className="text-xs text-muted">
-                  {period
-                    ? `${period.billingDate.getDate()}일 결제`
-                    : "결제일 미설정"}
+                  {period.billingDate.getMonth() + 1}월{" "}
+                  {period.billingDate.getDate()}일 결제
                   {installment > 0 && ` · 할부 ${formatWonShort(installment)}`}
                 </p>
+                <p className="text-[11px] text-muted">
+                  {period.periodStart.getMonth() + 1}/
+                  {period.periodStart.getDate()} ~{" "}
+                  {period.periodEnd.getMonth() + 1}/
+                  {period.periodEnd.getDate()} 사용분
+                </p>
               </div>
-              <span className="tabular text-sm font-bold">
-                {formatWon(total)}
-              </span>
+              <div className="shrink-0 text-right">
+                <p className="tabular text-sm font-bold">{formatWon(total)}</p>
+                <p
+                  className={`text-xs ${dday <= 2 ? "text-expense" : "text-muted"}`}
+                >
+                  {dday === 0 ? "오늘" : `D-${dday}`}
+                </p>
+              </div>
             </li>
           ))}
         </ul>
