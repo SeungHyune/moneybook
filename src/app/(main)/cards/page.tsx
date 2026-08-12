@@ -135,7 +135,7 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                             {period.periodStart.getMonth() + 1}/
                             {period.periodStart.getDate()} ~{" "}
                             {period.periodEnd.getMonth() + 1}/
-                            {period.periodEnd.getDate()}
+                            {period.periodEnd.getDate()} 사용분
                           </p>
                         ) : (
                           <p className="text-[10px] text-muted">사용액</p>

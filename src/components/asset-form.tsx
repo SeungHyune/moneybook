@@ -11,8 +11,9 @@ import {
 } from "@/app/actions/asset";
 import { Field, Input, Select } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { getStatementPeriod } from "@/lib/billing";
 import { ACCOUNT_TYPE_LABEL, BANKS, CARD_ISSUERS } from "@/lib/labels";
-import { cn } from "@/lib/utils";
+import { cn, toYearMonth } from "@/lib/utils";
 import type { AccountType, CardType, MemberRole } from "@/generated/prisma/enums";
 
 export type AssetMember = {
@@ -220,6 +221,11 @@ function CardForm({
   const [type, setType] = useState<CardType>(card?.type ?? "CREDIT");
   const [color, setColor] = useState(card?.color ?? CARD_COLORS[0]);
 
+  // 청구 주기 미리보기를 위해 입력값을 들고 있는다
+  const [billingDay, setBillingDay] = useState(card?.billingDay ?? 25);
+  const [startDay, setStartDay] = useState(card?.statementStartDay ?? 12);
+  const [endDay, setEndDay] = useState(card?.statementEndDay ?? 11);
+
   const owners = assignableMembers(members, currentMember);
   const isAdmin = currentMember.role === "ADMIN" || currentMember.role === "OWNER";
 
@@ -299,7 +305,8 @@ function CardForm({
               inputMode="numeric"
               min={1}
               max={31}
-              defaultValue={card?.billingDay ?? 25}
+              value={billingDay}
+              onChange={(event) => setBillingDay(Number(event.target.value))}
               required
             />
           </Field>
@@ -312,7 +319,8 @@ function CardForm({
                 inputMode="numeric"
                 min={1}
                 max={31}
-                defaultValue={card?.statementStartDay ?? 12}
+                value={startDay}
+                onChange={(event) => setStartDay(Number(event.target.value))}
               />
             </Field>
             <Field label="이용기간 종료">
@@ -322,14 +330,21 @@ function CardForm({
                 inputMode="numeric"
                 min={1}
                 max={31}
-                defaultValue={card?.statementEndDay ?? 11}
+                value={endDay}
+                onChange={(event) => setEndDay(Number(event.target.value))}
               />
             </Field>
           </div>
 
+          <BillingCyclePreview
+            billingDay={billingDay}
+            startDay={startDay}
+            endDay={endDay}
+          />
+
           <p className="text-xs leading-relaxed text-muted">
-            보통 &ldquo;전월 12일 ~ 당월 11일 사용분을 25일에 결제&rdquo;처럼
-            정해져 있어요. 카드사 앱에서 확인할 수 있습니다.
+            카드사 앱의 &ldquo;결제일별 이용기간&rdquo;에서 확인할 수 있어요.
+            결제일이 이른 달(1~10일)이면 전전월 사용분이 청구되는 게 정상입니다.
           </p>
 
           <Field
@@ -532,6 +547,72 @@ function AccountForm({
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * 입력한 결제일·이용기간이 실제로 어떤 주기가 되는지 바로 보여준다.
+ *
+ * 결제일이 이른 달(1~10일)인 카드는 전전월 사용분이 청구되는 게 정상인데,
+ * 화면에 날짜만 나오면 잘못 설정한 것처럼 보여서 이 미리보기를 붙였다.
+ */
+function BillingCyclePreview({
+  billingDay,
+  startDay,
+  endDay,
+}: {
+  billingDay: number;
+  startDay: number;
+  endDay: number;
+}) {
+  const thisMonth = toYearMonth(new Date());
+
+  const period = getStatementPeriod(
+    {
+      billingDay: billingDay || null,
+      statementStartDay: startDay || null,
+      statementEndDay: endDay || null,
+    },
+    thisMonth,
+  );
+
+  if (!period) {
+    return (
+      <p className="rounded-xl bg-surface-muted px-3 py-2.5 text-xs text-muted">
+        결제일을 입력하면 청구 주기를 미리 보여드려요.
+      </p>
+    );
+  }
+
+  const md = (date: Date) => `${date.getMonth() + 1}월 ${date.getDate()}일`;
+
+  // 사용 기간이 한 달 언저리를 벗어나면 입력이 틀렸을 가능성이 높다
+  const days = Math.round(
+    (period.periodEnd.getTime() - period.periodStart.getTime()) / 86_400_000,
+  );
+  const looksOff = days < 25 || days > 35;
+
+  return (
+    <div
+      className={`rounded-xl px-3 py-2.5 text-xs leading-relaxed ${
+        looksOff ? "bg-warning/10 text-warning" : "bg-surface-muted text-muted"
+      }`}
+    >
+      <p>
+        <strong className="text-foreground">{md(period.billingDate)}</strong>에
+        결제되는 금액은
+        <br />
+        <strong className="text-foreground">
+          {md(period.periodStart)} ~ {md(period.periodEnd)}
+        </strong>{" "}
+        사용분이에요.
+      </p>
+      {looksOff && (
+        <p className="mt-1">
+          사용 기간이 {days}일이에요. 시작·종료일을 다시 확인해 주세요.
+        </p>
+      )}
+    </div>
+  );
+}
 
 function OwnerField({
   owners,
