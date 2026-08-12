@@ -58,6 +58,56 @@ function nullify(value: string | undefined) {
   return value && value.length > 0 ? value : null;
 }
 
+/**
+ * 카드 종류에 따라 "계좌에서 즉시 빠지는지"와 "할부가 되는지"를 정리한다.
+ * 등록과 수정이 같은 규칙을 쓰도록 한 곳에 모아 뒀다.
+ *
+ *   신용   : 결제일에 청구 → accountId 없음, 할부 가능
+ *   체크   : 즉시 출금    → 연결 계좌를 accountId 로, 할부 없음
+ *   선불   : 충전액에서   → accountId 없음, 할부 없음
+ */
+function resolveCardEffect({
+  card,
+  requestedAccountId,
+  requestedInstallments,
+}: {
+  card: { type: "CREDIT" | "DEBIT" | "PREPAID"; paymentAccountId: string | null } | null;
+  requestedAccountId: string | null;
+  requestedInstallments: number;
+}) {
+  if (!card) {
+    return {
+      accountId: requestedAccountId,
+      installmentMonths: 1,
+      isCreditCard: false,
+    };
+  }
+
+  if (card.type === "CREDIT") {
+    return {
+      accountId: null,
+      installmentMonths: requestedInstallments,
+      isCreditCard: true,
+    };
+  }
+
+  if (card.type === "DEBIT") {
+    return {
+      accountId: card.paymentAccountId ?? requestedAccountId,
+      installmentMonths: 1,
+      isCreditCard: false,
+    };
+  }
+
+  // PREPAID
+  return { accountId: null, installmentMonths: 1, isCreditCard: false };
+}
+
+/** 거래 한 건이 계좌 잔액에 준 영향 (양수면 잔액이 늘어야 한다) */
+function balanceDelta(type: "INCOME" | "EXPENSE" | "TRANSFER", amount: number) {
+  return type === "INCOME" ? amount : -amount;
+}
+
 export async function createTransaction(
   _prevState: ActionState,
   formData: FormData,
@@ -108,20 +158,11 @@ export async function createTransaction(
    * 그러면 잔액 반영/원복이 "거래에 적힌 계좌"만 보고 처리돼서 어긋나지 않고,
    * 내역에서도 어느 통장에서 나갔는지 보여줄 수 있다.
    */
-  const isCreditCard = card?.type === "CREDIT";
-  const isDebitCard = card?.type === "DEBIT";
-  const isPrepaidCard = card?.type === "PREPAID";
-
-  const installmentMonths = isCreditCard ? requestedInstallments : 1;
-
-  let accountId = nullify(data.accountId);
-  if (isDebitCard) {
-    // 연결 계좌가 없으면 사용자가 고른 계좌라도 쓴다
-    accountId = card?.paymentAccountId ?? accountId;
-  } else if (isCreditCard || isPrepaidCard) {
-    // 즉시 출금이 아니므로 계좌를 물리지 않는다
-    accountId = null;
-  }
+  const { accountId, installmentMonths, isCreditCard } = resolveCardEffect({
+    card,
+    requestedAccountId: nullify(data.accountId),
+    requestedInstallments,
+  });
 
   await prisma.$transaction(async (tx) => {
     const created = await tx.transaction.create({
@@ -193,6 +234,163 @@ export async function createTransaction(
           data.type === "INCOME"
             ? { balance: { increment: data.amount } }
             : { balance: { decrement: data.amount } },
+      });
+    }
+  });
+
+  revalidatePath("/", "layout");
+  redirect("/transactions");
+}
+
+const updateSchema = transactionSchema.safeExtend({
+  transactionId: z.string().uuid(),
+});
+
+/**
+ * 내역 수정.
+ *
+ * 잔액은 "이전 영향을 지우고 새 영향을 준다"로 처리한다.
+ * 계좌나 카드가 바뀌어도 어긋나지 않게 하려면 이 순서가 안전하다.
+ * 할부 스케줄도 통째로 다시 만든다.
+ */
+export async function updateTransaction(
+  _prevState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const raw = Object.fromEntries(formData) as Record<string, string>;
+
+  const parsed = updateSchema.safeParse({
+    ...raw,
+    isInterestFree: raw.isInterestFree === "on" || raw.isInterestFree === "true",
+    isShared: raw.isShared !== "false",
+    excludeFromStats:
+      raw.excludeFromStats === "on" || raw.excludeFromStats === "true",
+  });
+
+  if (!parsed.success) {
+    return {
+      error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요.",
+    };
+  }
+
+  const data = parsed.data;
+
+  const before = await prisma.transaction.findFirst({
+    where: { id: data.transactionId, householdId: data.householdId },
+  });
+  if (!before) return { error: "내역을 찾을 수 없어요." };
+
+  const { member } = await requireMembership(data.householdId, "MEMBER");
+
+  const cardId = nullify(data.cardId);
+  const toAccountId = nullify(data.toAccountId);
+
+  const card = cardId
+    ? await prisma.card.findFirst({
+        where: { id: cardId, householdId: data.householdId },
+      })
+    : null;
+
+  const requestedInstallments =
+    data.paymentMethod === "CARD" || data.paymentMethod === "MOBILE_PAY"
+      ? data.installmentMonths
+      : 1;
+
+  const { accountId, installmentMonths, isCreditCard } = resolveCardEffect({
+    card,
+    requestedAccountId: nullify(data.accountId),
+    requestedInstallments,
+  });
+
+  await prisma.$transaction(async (tx) => {
+    // 1) 이전 영향 되돌리기
+    if (before.type === "TRANSFER") {
+      if (before.accountId) {
+        await tx.account.update({
+          where: { id: before.accountId },
+          data: { balance: { increment: before.amount } },
+        });
+      }
+      if (before.toAccountId) {
+        await tx.account.update({
+          where: { id: before.toAccountId },
+          data: { balance: { decrement: before.amount } },
+        });
+      }
+    } else if (before.accountId) {
+      await tx.account.update({
+        where: { id: before.accountId },
+        data: { balance: { decrement: balanceDelta(before.type, before.amount) } },
+      });
+    }
+
+    await tx.installmentPlan.deleteMany({
+      where: { transactionId: before.id },
+    });
+
+    // 2) 새 값 저장
+    await tx.transaction.update({
+      where: { id: before.id },
+      data: {
+        type: data.type,
+        amount: data.amount,
+        occurredAt: data.occurredAt,
+        merchant: nullify(data.merchant),
+        memo: nullify(data.memo),
+        categoryId: nullify(data.categoryId),
+        paymentMethod: data.paymentMethod,
+        cardId,
+        accountId,
+        toAccountId,
+        installmentMonths,
+        isInterestFree: data.isInterestFree,
+        interestAmount: data.isInterestFree ? 0 : data.interestAmount,
+        approvalNo: nullify(data.approvalNo),
+        payerMemberId: nullify(data.payerMemberId) ?? member.id,
+        isShared: data.isShared,
+        excludeFromStats: data.excludeFromStats,
+      },
+    });
+
+    // 3) 새 영향 적용
+    if (card && isCreditCard && data.type === "EXPENSE") {
+      const rounds = buildInstallmentSchedule({
+        amount: data.amount,
+        months: installmentMonths,
+        purchaseDate: data.occurredAt,
+        card,
+        interestAmount: data.isInterestFree ? 0 : data.interestAmount,
+      });
+
+      await tx.installmentPlan.createMany({
+        data: rounds.map((round) => ({
+          transactionId: before.id,
+          round: round.round,
+          totalRounds: round.totalRounds,
+          amount: round.amount,
+          interest: round.interest,
+          billingDate: round.billingDate,
+        })),
+      });
+    }
+
+    if (data.type === "TRANSFER") {
+      if (accountId) {
+        await tx.account.update({
+          where: { id: accountId },
+          data: { balance: { decrement: data.amount } },
+        });
+      }
+      if (toAccountId) {
+        await tx.account.update({
+          where: { id: toAccountId },
+          data: { balance: { increment: data.amount } },
+        });
+      }
+    } else if (accountId) {
+      await tx.account.update({
+        where: { id: accountId },
+        data: { balance: { increment: balanceDelta(data.type, data.amount) } },
       });
     }
   });

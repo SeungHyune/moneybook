@@ -1,9 +1,13 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
-import { createTransaction } from "@/app/actions/transaction";
+import { ChevronLeft, Trash2 } from "lucide-react";
+import {
+  createTransaction,
+  deleteTransaction,
+  updateTransaction,
+} from "@/app/actions/transaction";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
 import {
@@ -70,29 +74,68 @@ const EXPENSE_METHODS: PaymentMethod[] = [
 
 const INCOME_METHODS: PaymentMethod[] = ["BANK_TRANSFER", "CASH", "OTHER"];
 
+/** 수정 화면에서 채워 넣을 기존 값 */
+export type EditableTransaction = {
+  id: string;
+  type: TransactionType;
+  amount: number;
+  occurredAt: Date;
+  merchant: string | null;
+  memo: string | null;
+  categoryId: string | null;
+  paymentMethod: PaymentMethod;
+  cardId: string | null;
+  accountId: string | null;
+  toAccountId: string | null;
+  installmentMonths: number;
+  isInterestFree: boolean;
+  interestAmount: number;
+  approvalNo: string | null;
+  payerMemberId: string | null;
+  isShared: boolean;
+  excludeFromStats: boolean;
+};
+
 export function TransactionForm({
   householdId,
   currentMemberId,
   options,
   defaultType = "EXPENSE",
+  transaction,
 }: {
   householdId: string;
   currentMemberId: string;
   options: Options;
   defaultType?: TransactionType;
+  transaction?: EditableTransaction;
 }) {
   const router = useRouter();
-  const [state, formAction] = useActionState(createTransaction, null);
 
-  const [type, setType] = useState<TransactionType>(defaultType);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
-    defaultType === "INCOME" ? "BANK_TRANSFER" : "CARD",
+  const isEdit = Boolean(transaction);
+  const [state, formAction] = useActionState(
+    isEdit ? updateTransaction : createTransaction,
+    null,
   );
-  const [cardId, setCardId] = useState("");
-  const [installmentMonths, setInstallmentMonths] = useState(1);
-  const [isInterestFree, setIsInterestFree] = useState(true);
-  const [categoryId, setCategoryId] = useState("");
-  const [amountText, setAmountText] = useState("");
+  const [isDeleting, startDelete] = useTransition();
+
+  const [type, setType] = useState<TransactionType>(
+    transaction?.type ?? defaultType,
+  );
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
+    transaction?.paymentMethod ??
+      (defaultType === "INCOME" ? "BANK_TRANSFER" : "CARD"),
+  );
+  const [cardId, setCardId] = useState(transaction?.cardId ?? "");
+  const [installmentMonths, setInstallmentMonths] = useState(
+    transaction?.installmentMonths ?? 1,
+  );
+  const [isInterestFree, setIsInterestFree] = useState(
+    transaction?.isInterestFree ?? true,
+  );
+  const [categoryId, setCategoryId] = useState(transaction?.categoryId ?? "");
+  const [amountText, setAmountText] = useState(
+    transaction ? new Intl.NumberFormat("ko-KR").format(transaction.amount) : "",
+  );
 
   const amount = Number(amountText.replace(/[^\d]/g, "")) || 0;
 
@@ -143,6 +186,9 @@ export function TransactionForm({
   return (
     <form action={formAction} className="pb-8">
       <input type="hidden" name="householdId" value={householdId} />
+      {transaction && (
+        <input type="hidden" name="transactionId" value={transaction.id} />
+      )}
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="amount" value={amount} />
       <input type="hidden" name="paymentMethod" value={paymentMethod} />
@@ -172,8 +218,31 @@ export function TransactionForm({
           >
             <ChevronLeft className="size-5" />
           </button>
-          <h1 className="text-base font-bold">내역 등록</h1>
-          <div className="size-9" />
+          <h1 className="text-base font-bold">
+            {isEdit ? "내역 수정" : "내역 등록"}
+          </h1>
+
+          {isEdit ? (
+            <button
+              type="button"
+              aria-label="삭제"
+              disabled={isDeleting}
+              onClick={() => {
+                if (!confirm("이 내역을 삭제할까요? 계좌 잔액도 함께 되돌립니다."))
+                  return;
+                startDelete(async () => {
+                  await deleteTransaction(transaction!.id);
+                  router.push("/transactions");
+                  router.refresh();
+                });
+              }}
+              className="flex size-9 items-center justify-center rounded-full text-expense active:bg-surface-muted disabled:opacity-50"
+            >
+              <Trash2 className="size-5" />
+            </button>
+          ) : (
+            <div className="size-9" />
+          )}
         </div>
       </header>
 
@@ -231,7 +300,7 @@ export function TransactionForm({
             type="datetime-local"
             name="occurredAt"
             required
-            defaultValue={toLocalInputValue(new Date())}
+            defaultValue={toLocalInputValue(transaction?.occurredAt ?? new Date())}
           />
         </Field>
 
@@ -241,6 +310,7 @@ export function TransactionForm({
             name="merchant"
             placeholder={type === "INCOME" ? "회사 이름 등" : "가게 이름"}
             maxLength={60}
+            defaultValue={transaction?.merchant ?? ""}
             autoComplete="off"
           />
         </Field>
@@ -415,6 +485,7 @@ export function TransactionForm({
                 name="approvalNo"
                 placeholder="카드 문자에 찍힌 번호"
                 maxLength={30}
+                defaultValue={transaction?.approvalNo ?? ""}
                 autoComplete="off"
               />
             </Field>
@@ -431,7 +502,7 @@ export function TransactionForm({
                 : undefined
             }
           >
-            <Select name="accountId" defaultValue="">
+            <Select name="accountId" defaultValue={transaction?.accountId ?? ""}>
               <option value="">선택 안 함</option>
               {options.accounts.map((account) => (
                 <option key={account.id} value={account.id}>
@@ -445,7 +516,11 @@ export function TransactionForm({
 
         {type === "TRANSFER" && (
           <Field label="입금 계좌">
-            <Select name="toAccountId" defaultValue="" required>
+            <Select
+              name="toAccountId"
+              defaultValue={transaction?.toAccountId ?? ""}
+              required
+            >
               <option value="">선택하세요</option>
               {options.accounts.map((account) => (
                 <option key={account.id} value={account.id}>
@@ -460,7 +535,10 @@ export function TransactionForm({
         {/* 결제한 사람 */}
         {options.members.length > 1 && (
           <Field label="결제한 사람">
-            <Select name="payerMemberId" defaultValue={currentMemberId}>
+            <Select
+              name="payerMemberId"
+              defaultValue={transaction?.payerMemberId ?? currentMemberId}
+            >
               {options.members.map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.displayName ?? member.user.nickname}
@@ -472,13 +550,19 @@ export function TransactionForm({
 
         {/* 메모 */}
         <Field label="메모 (선택)">
-          <Textarea name="memo" placeholder="남길 말" maxLength={200} />
+          <Textarea
+            name="memo"
+            placeholder="남길 말"
+            maxLength={200}
+            defaultValue={transaction?.memo ?? ""}
+          />
         </Field>
 
         <label className="flex items-center gap-2 text-sm text-muted">
           <input
             type="checkbox"
             name="excludeFromStats"
+            defaultChecked={transaction?.excludeFromStats ?? false}
             className="size-4 accent-[var(--primary)]"
           />
           통계에서 제외하기
@@ -494,7 +578,11 @@ export function TransactionForm({
         )}
 
         <SubmitButton size="lg" className="w-full" disabled={amount <= 0}>
-          {amount > 0 ? `${formatWon(amount)} 등록하기` : "금액을 입력하세요"}
+          {amount <= 0
+            ? "금액을 입력하세요"
+            : isEdit
+              ? `${formatWon(amount)} 로 저장하기`
+              : `${formatWon(amount)} 등록하기`}
         </SubmitButton>
       </div>
     </form>

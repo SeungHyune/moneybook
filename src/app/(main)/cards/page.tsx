@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Pencil, Plus } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
+import { CardStatementActions } from "@/components/card-statement-actions";
 import { MonthSwitcher } from "@/components/month-switcher";
 import { canManageAsset, requireHouseholdContext } from "@/lib/auth";
 import { getCardBillings, getFormOptions, getTotalAssets } from "@/lib/queries";
@@ -86,7 +87,7 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
             />
           ) : (
             <ul className="space-y-2">
-              {billings.map(({ card, total, lumpSum, installment, period, ongoingInstallments, isCredit, monthlyUsage }) => (
+              {billings.map(({ card, total, lumpSum, installment, period, ongoingInstallments, isCredit, monthlyUsage, statement }) => (
                 <li
                   key={card.id}
                   className="overflow-hidden rounded-2xl border border-border bg-surface"
@@ -189,6 +190,19 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                         </li>
                       ))}
                     </ul>
+                  )}
+
+                  {/* 결제일에 통장에서 빠지는 처리 (신용카드만) */}
+                  {isCredit && (total > 0 || statement?.isPaid) && (
+                    <CardStatementActions
+                      cardId={card.id}
+                      yearMonth={yearMonth}
+                      amount={total}
+                      accountName={card.paymentAccount?.name ?? null}
+                      hasAccount={Boolean(card.paymentAccountId)}
+                      isPaid={Boolean(statement?.isPaid)}
+                      paidAmount={statement?.totalAmount ?? null}
+                    />
                   )}
                 </li>
               ))}

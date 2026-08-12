@@ -133,7 +133,7 @@ export async function getCardBillings(householdId: string, yearMonth: string) {
    * 체크/선불카드는 청구서가 없다 (긁는 즉시 계좌에서 빠지거나 충전액에서 빠진다).
    * 그래서 그 카드들은 대신 "그 달에 얼마 썼는지"를 보여준다.
    */
-  const [plans, usage] = await Promise.all([
+  const [plans, usage, statements] = await Promise.all([
     prisma.installmentPlan.findMany({
       where: {
         billingDate: { gte: monthStart, lte: monthEnd },
@@ -162,10 +162,17 @@ export async function getCardBillings(householdId: string, yearMonth: string) {
       },
       _sum: { amount: true },
     }),
+    // 이 달 카드대금을 이미 냈는지
+    prisma.cardStatement.findMany({
+      where: { householdId, yearMonth },
+    }),
   ]);
 
   const usageByCard = new Map(
     usage.map((row) => [row.cardId, row._sum.amount ?? 0]),
+  );
+  const statementByCard = new Map(
+    statements.map((statement) => [statement.cardId, statement]),
   );
 
   return cards.map((card) => {
@@ -192,6 +199,8 @@ export async function getCardBillings(householdId: string, yearMonth: string) {
       total: lumpSum + installment,
       /** 그 달에 이 카드로 결제한 총액 (체크/선불카드 표시용) */
       monthlyUsage: usageByCard.get(card.id) ?? 0,
+      /** 이 달 카드대금 납부 기록 (없으면 아직 안 낸 것) */
+      statement: statementByCard.get(card.id) ?? null,
       /** 진행 중인 할부 (남은 회차 표시용) */
       ongoingInstallments: cardPlans
         .filter((plan) => plan.totalRounds > 1)

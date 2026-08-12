@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { PAYMENT_METHOD_LABEL, installmentLabel } from "@/lib/labels";
 import { formatWon } from "@/lib/utils";
 import type {
@@ -33,9 +34,12 @@ export type TransactionRowData = {
 export function TransactionRow({
   transaction,
   showDate = false,
+  /** 눌렀을 때 수정 화면으로 갈지 (목록에서는 true) */
+  editable = true,
 }: {
   transaction: TransactionRowData;
   showDate?: boolean;
+  editable?: boolean;
 }) {
   const {
     type,
@@ -77,8 +81,8 @@ export function TransactionRow({
 
   const sign = type === "INCOME" ? "+" : type === "EXPENSE" ? "-" : "";
 
-  return (
-    <li className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+  const content = (
+    <>
       <span
         className="flex size-9 shrink-0 items-center justify-center rounded-full text-base"
         style={{ backgroundColor: `${category?.color ?? "#9ca3af"}1a` }}
@@ -100,6 +104,22 @@ export function TransactionRow({
         {sign}
         {formatWon(amount)}
       </span>
+    </>
+  );
+
+  return (
+    <li className="first:pt-0 last:pb-0">
+      {editable ? (
+        // 줄을 누르면 수정 화면으로
+        <Link
+          href={`/transactions/${transaction.id}/edit`}
+          className="-mx-2 flex items-center gap-3 rounded-xl px-2 py-3 transition active:bg-surface-muted"
+        >
+          {content}
+        </Link>
+      ) : (
+        <div className="flex items-center gap-3 py-3">{content}</div>
+      )}
     </li>
   );
 }

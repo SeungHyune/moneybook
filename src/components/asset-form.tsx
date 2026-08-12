@@ -332,7 +332,10 @@ function CardForm({
             정해져 있어요. 카드사 앱에서 확인할 수 있습니다.
           </p>
 
-          <Field label="결제 계좌 (선택)">
+          <Field
+            label="출금 통장"
+            hint="결제일에 카드대금이 빠져나가는 통장이에요. 연결해두면 카드/자산 화면에서 바로 납부 처리할 수 있습니다."
+          >
             <Select
               name="paymentAccountId"
               defaultValue={card?.paymentAccountId ?? ""}
@@ -346,6 +349,12 @@ function CardForm({
               ))}
             </Select>
           </Field>
+
+          {accounts.length === 0 && (
+            <p className="text-xs text-warning">
+              등록된 계좌가 없어요. 계좌를 먼저 등록하면 연결할 수 있습니다.
+            </p>
+          )}
         </div>
       )}
 
