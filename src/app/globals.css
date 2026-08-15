@@ -109,6 +109,17 @@ html {
   /* 주소창 높이 변화에 흔들리지 않게 */
   height: 100%;
   -webkit-tap-highlight-color: transparent;
+  /* 오버스크롤·안전영역(노치/홈바)에서 흰색이 새어 나오지 않게
+     최상위 캔버스에도 배경을 칠한다 */
+  background: var(--background);
+}
+
+/* 홈 화면 앱은 스플래시가 먼저 뜨므로, 첫 페인트의 밑바탕도 스플래시와 같은
+   색으로 깔아 흰 화면 구간을 없앤다. 스플래시가 걷히면 app-shell 이 덮는다. */
+@media (display-mode: standalone) {
+  html {
+    background: linear-gradient(135deg, #3b5bfd, #6348e0);
+  }
 }
 
 body {
@@ -191,7 +202,9 @@ body {
 @media (display-mode: standalone) {
   .app-splash {
     position: fixed;
-    inset: 0;
+    /* 안전영역(상단 노치·하단 홈바) 밖까지 확실히 덮는다 */
+    inset: calc(-1 * var(--safe-top, 0px)) 0 calc(-1 * var(--safe-bottom, 0px));
+    min-height: 100lvh;
     z-index: 100;
     display: flex;
     align-items: center;

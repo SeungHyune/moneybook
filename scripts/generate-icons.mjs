@@ -291,10 +291,18 @@ function renderSplash(width, height) {
   return encodePng(width, height, out);
 }
 
-/** iOS 기기별 실행 화면. media query 로 골라 쓰도록 layout.tsx 에 링크가 있다. */
+/**
+ * iOS 기기별 실행 화면. media query 로 골라 쓰도록 layout.tsx 에 링크가 있다.
+ * iOS 는 해상도가 "정확히 일치"해야만 이미지를 쓴다 — 안 맞으면 흰 화면이 뜬다.
+ * 새 아이폰이 나오면 여기와 layout.tsx 의 IOS_SPLASH 에 함께 추가할 것.
+ */
 const SPLASH_TARGETS = [
-  { file: "splash-1290x2796.png", width: 1290, height: 2796 }, //  15/14 Pro Max
-  { file: "splash-1179x2556.png", width: 1179, height: 2556 }, //  15/15 Pro/14 Pro
+  { file: "splash-1320x2868.png", width: 1320, height: 2868 }, //  17 Pro Max/16 Pro Max
+  { file: "splash-1260x2736.png", width: 1260, height: 2736 }, //  17 Air
+  { file: "splash-1206x2622.png", width: 1206, height: 2622 }, //  17/17 Pro/16 Pro
+  { file: "splash-1290x2796.png", width: 1290, height: 2796 }, //  16 Plus/15 Pro Max/14 Pro Max
+  { file: "splash-1284x2778.png", width: 1284, height: 2778 }, //  15 Plus/14 Plus/13 Pro Max
+  { file: "splash-1179x2556.png", width: 1179, height: 2556 }, //  16/15/15 Pro/14 Pro
   { file: "splash-1170x2532.png", width: 1170, height: 2532 }, //  14/13/12
   { file: "splash-1125x2436.png", width: 1125, height: 2436 }, //  X/XS/11 Pro
   { file: "splash-828x1792.png", width: 828, height: 1792 }, //  XR/11

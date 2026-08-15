@@ -4,10 +4,17 @@ import "./globals.css";
 
 const APP_NAME = "우리집 가계부";
 
-/** iOS 기기별 실행 화면 (scripts/generate-icons.mjs 가 만든 파일과 짝을 이룬다) */
+/**
+ * iOS 기기별 실행 화면 (scripts/generate-icons.mjs 가 만든 파일과 짝).
+ * 해상도가 정확히 일치해야만 뜨므로 세대별로 전부 나열한다.
+ */
 const IOS_SPLASH = [
-  { width: 1290, height: 2796, ratio: 3 }, //  15/14 Pro Max
-  { width: 1179, height: 2556, ratio: 3 }, //  15/15 Pro/14 Pro
+  { width: 1320, height: 2868, ratio: 3 }, //  17 Pro Max/16 Pro Max
+  { width: 1260, height: 2736, ratio: 3 }, //  17 Air
+  { width: 1206, height: 2622, ratio: 3 }, //  17/17 Pro/16 Pro
+  { width: 1290, height: 2796, ratio: 3 }, //  16 Plus/15 Pro Max/14 Pro Max
+  { width: 1284, height: 2778, ratio: 3 }, //  15 Plus/14 Plus/13 Pro Max
+  { width: 1179, height: 2556, ratio: 3 }, //  16/15/15 Pro/14 Pro
   { width: 1170, height: 2532, ratio: 3 }, //  14/13/12
   { width: 1125, height: 2436, ratio: 3 }, //  X/XS/11 Pro
   { width: 828, height: 1792, ratio: 2 }, //  XR/11
@@ -81,7 +88,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             key={`${width}x${height}`}
             rel="apple-touch-startup-image"
             href={`/icons/splash-${width}x${height}.png`}
-            media={`(device-width: ${width / ratio}px) and (device-height: ${height / ratio}px) and (-webkit-device-pixel-ratio: ${ratio})`}
+            media={`(device-width: ${width / ratio}px) and (device-height: ${height / ratio}px) and (-webkit-device-pixel-ratio: ${ratio}) and (orientation: portrait)`}
           />
         ))}
       </head>
