@@ -130,6 +130,8 @@ model User {
   sentInvites     Invite[]          @relation("InviteCreatedBy")
   /// 마지막으로 보고 있던 가구 (여러 가구에 속할 수 있으므로)
   lastHouseholdId String?           @db.Uuid
+  /// 사용법 튜토리얼을 본 시각. null 이면 첫 방문에 튜토리얼을 띄운다.
+  tutorialSeenAt  DateTime?
 
   pushSubscriptions PushSubscription[]
   inboxItems        IngestInbox[]

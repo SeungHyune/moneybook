@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronRight, LogOut, Users } from "lucide-react";
+import { BookOpen, ChevronRight, LogOut, Users } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { HouseholdSettingsForm } from "@/components/household-settings-form";
 import { NotificationSettings } from "@/components/notification-settings";
@@ -46,6 +46,19 @@ export default async function SettingsPage() {
             </p>
           </div>
         </section>
+
+        {/* 사용 방법 다시 보기 */}
+        <Link
+          href="/?tutorial=1"
+          className="flex items-center gap-3 rounded-2xl border border-border bg-surface p-4 transition active:bg-surface-muted"
+        >
+          <BookOpen className="size-5 shrink-0 text-muted" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">사용 방법 다시 보기</p>
+            <p className="text-xs text-muted">처음 봤던 안내를 다시 볼 수 있어요</p>
+          </div>
+          <ChevronRight className="size-5 shrink-0 text-muted" />
+        </Link>
 
         {/* 구성원 */}
         <Link

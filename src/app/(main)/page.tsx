@@ -4,6 +4,7 @@ import { ArrowRight, CalendarClock, CreditCard } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { MonthSwitcher } from "@/components/month-switcher";
 import { TransactionRow } from "@/components/transaction-row";
+import { TutorialOverlay } from "@/components/tutorial-overlay";
 import {
   SectionSkeleton,
   SummarySkeleton,
@@ -45,8 +46,14 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
   const householdId = household.id;
   const monthStartDay = household.monthStartDay;
 
+  // 처음 온 사용자거나(tutorialSeenAt 없음) "다시 보기"(/?tutorial=1)로 연 경우
+  const forceTutorial = params.tutorial === "1";
+  const showTutorial = forceTutorial || user.tutorialSeenAt === null;
+
   return (
     <>
+      {showTutorial && <TutorialOverlay forceOpen={forceTutorial} />}
+
       <AppHeader title={household.name} showSettings />
 
       <div className="space-y-4 px-4 py-4">
