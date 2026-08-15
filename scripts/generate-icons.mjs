@@ -238,6 +238,69 @@ function renderIcon(size, { maskable = false } = {}) {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * iOS 홈 화면 앱 실행 화면(스플래시).
+ *
+ * iOS 는 Android 와 달리 manifest 로 스플래시를 만들어 주지 않아서,
+ * 이 이미지가 없으면 앱을 열 때 흰 화면이 뜬다. 해상도별로 따로 필요하다.
+ */
+function renderSplash(width, height) {
+  const out = Buffer.alloc(width * height * 4);
+
+  // 심볼은 짧은 변의 22% 정도가 보기 좋다
+  const symbolSize = Math.round(Math.min(width, height) * 0.22);
+  const strokeWidth = symbolSize * 0.1;
+  const segments = wonSymbolSegments(width / 2, height / 2, symbolSize);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+
+      const t = (x / width + y / height) / 2;
+      let r = Math.round(CONFIG.bgFrom[0] + (CONFIG.bgTo[0] - CONFIG.bgFrom[0]) * t);
+      let g = Math.round(CONFIG.bgFrom[1] + (CONFIG.bgTo[1] - CONFIG.bgFrom[1]) * t);
+      let b = Math.round(CONFIG.bgFrom[2] + (CONFIG.bgTo[2] - CONFIG.bgFrom[2]) * t);
+
+      // 안티앨리어싱: 선 경계에서 부드럽게 섞는다
+      let coverage = 0;
+      for (const [ax, ay, bx, by] of segments) {
+        const distance = distanceToSegment(x, y, ax, ay, bx, by);
+        const edge = strokeWidth / 2;
+        if (distance <= edge - 0.5) {
+          coverage = 1;
+          break;
+        }
+        if (distance < edge + 0.5) {
+          coverage = Math.max(coverage, edge + 0.5 - distance);
+        }
+      }
+
+      if (coverage > 0) {
+        r = Math.round(r + (CONFIG.symbol[0] - r) * coverage);
+        g = Math.round(g + (CONFIG.symbol[1] - g) * coverage);
+        b = Math.round(b + (CONFIG.symbol[2] - b) * coverage);
+      }
+
+      out[index] = r;
+      out[index + 1] = g;
+      out[index + 2] = b;
+      out[index + 3] = 255;
+    }
+  }
+
+  return encodePng(width, height, out);
+}
+
+/** iOS 기기별 실행 화면. media query 로 골라 쓰도록 layout.tsx 에 링크가 있다. */
+const SPLASH_TARGETS = [
+  { file: "splash-1290x2796.png", width: 1290, height: 2796 }, //  15/14 Pro Max
+  { file: "splash-1179x2556.png", width: 1179, height: 2556 }, //  15/15 Pro/14 Pro
+  { file: "splash-1170x2532.png", width: 1170, height: 2532 }, //  14/13/12
+  { file: "splash-1125x2436.png", width: 1125, height: 2436 }, //  X/XS/11 Pro
+  { file: "splash-828x1792.png", width: 828, height: 1792 }, //  XR/11
+  { file: "splash-750x1334.png", width: 750, height: 1334 }, //  SE
+];
+
 const TARGETS = [
   { file: "icon-192.png", size: 192, maskable: false },
   { file: "icon-512.png", size: 512, maskable: false },
@@ -256,4 +319,12 @@ for (const { file, size, maskable } of TARGETS) {
   console.log(`✓ ${file} (${size}x${size}, ${(png.length / 1024).toFixed(1)}KB)`);
 }
 
-console.log(`\n아이콘 ${TARGETS.length}개를 public/icons 에 만들었습니다.`);
+for (const { file, width, height } of SPLASH_TARGETS) {
+  const png = renderSplash(width, height);
+  writeFileSync(resolve(OUT_DIR, file), png);
+  console.log(`✓ ${file} (${width}x${height}, ${(png.length / 1024).toFixed(1)}KB)`);
+}
+
+console.log(
+  `\n아이콘 ${TARGETS.length}개 + 실행화면 ${SPLASH_TARGETS.length}개를 public/icons 에 만들었습니다.`,
+);

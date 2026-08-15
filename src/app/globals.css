@@ -175,6 +175,60 @@ body {
   }
 }
 
+/* ---------------------------------------------------------------------------
+ * 실행 화면 (스플래시)
+ *
+ * 홈 화면에 설치해서 연 경우에만 보인다. 브라우저 탭에서는 방해만 되니 숨긴다.
+ * iOS 는 apple-touch-startup-image 가 먼저 뜨고, 앱이 로드되면 이 화면이
+ * 이어받아 자연스럽게 사라진다. Android 는 manifest 스플래시 다음에 이어진다.
+ *
+ * JS 없이 CSS 애니메이션만 쓴다 — 첫 페인트에 바로 떠야 하기 때문이다.
+ * ------------------------------------------------------------------------- */
+.app-splash {
+  display: none;
+}
+
+@media (display-mode: standalone) {
+  .app-splash {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #3b5bfd, #6348e0);
+    pointer-events: none;
+    animation: splash-out 700ms ease forwards;
+    animation-delay: 500ms;
+  }
+
+  .app-splash-mark {
+    font-size: 4.5rem;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+    animation: splash-mark 600ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+
+@keyframes splash-out {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+@keyframes splash-mark {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* 숫자는 폭이 흔들리지 않게 (금액 정렬용) */
 .tabular {
   font-variant-numeric: tabular-nums;

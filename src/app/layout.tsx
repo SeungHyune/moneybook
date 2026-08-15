@@ -4,6 +4,16 @@ import "./globals.css";
 
 const APP_NAME = "우리집 가계부";
 
+/** iOS 기기별 실행 화면 (scripts/generate-icons.mjs 가 만든 파일과 짝을 이룬다) */
+const IOS_SPLASH = [
+  { width: 1290, height: 2796, ratio: 3 }, //  15/14 Pro Max
+  { width: 1179, height: 2556, ratio: 3 }, //  15/15 Pro/14 Pro
+  { width: 1170, height: 2532, ratio: 3 }, //  14/13/12
+  { width: 1125, height: 2436, ratio: 3 }, //  X/XS/11 Pro
+  { width: 828, height: 1792, ratio: 2 }, //  XR/11
+  { width: 750, height: 1334, ratio: 2 }, //  SE
+];
+
 export const metadata: Metadata = {
   title: {
     default: APP_NAME,
@@ -60,6 +70,20 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             __html: `try{var t=localStorage.getItem("theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}`,
           }}
         />
+
+        {/*
+          iOS 홈 화면 앱 실행 화면.
+          Android 는 manifest 의 background_color + icon 으로 알아서 만들어 주지만,
+          iOS 는 이 이미지가 없으면 앱을 열 때 흰 화면이 뜬다. 기기 해상도별로 지정한다.
+        */}
+        {IOS_SPLASH.map(({ width, height, ratio }) => (
+          <link
+            key={`${width}x${height}`}
+            rel="apple-touch-startup-image"
+            href={`/icons/splash-${width}x${height}.png`}
+            media={`(device-width: ${width / ratio}px) and (device-height: ${height / ratio}px) and (-webkit-device-pixel-ratio: ${ratio})`}
+          />
+        ))}
       </head>
       <body className="app-backdrop">
         {/*
@@ -68,6 +92,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           이 요소가 스크롤 컨테이너라서 헤더/하단탭의 sticky 가 여기에 붙는다.
         */}
         <div className="app-shell">{children}</div>
+
+        {/* 홈 화면 앱으로 열었을 때만 잠깐 뜨는 실행 화면 (globals.css) */}
+        <div className="app-splash" aria-hidden>
+          <span className="app-splash-mark">₩</span>
+        </div>
+
         <ServiceWorkerRegister />
       </body>
     </html>
