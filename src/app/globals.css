@@ -148,36 +148,33 @@ body {
   background: var(--background);
 }
 
+/*
+ * 모바일: 문서 흐름 스크롤.
+ *
+ * iOS 26 WebKit 은 "화면 크기로 고정한 내부 스크롤 컨테이너" 레이아웃에서
+ * 하단에 유령 갭을 만드는 버그가 있다 (Safari 26.1 수정노트에 명시된 패턴).
+ * 그래서 모바일에서는 셸에 높이를 고정하지 않고 문서 자체가 스크롤한다 —
+ * 사파리가 가장 잘 다루는 기본 경로라 버그를 타지 않는다.
+ * 하단 탭은 sticky bottom-0 이므로 문서 스크롤에서도 그대로 바닥에 붙는다.
+ */
 .app-shell {
   position: relative;
   width: 100%;
   max-width: 512px;
-  height: 100dvh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  overflow-x: hidden;
   background: var(--background);
-  /* 셸 안에서 스크롤이 끝나도 바깥이 따라 움직이지 않게 */
-  overscroll-behavior: contain;
 }
 
-/*
- * iOS 홈 화면 앱(WebKit) 버그 대응.
- * standalone 모드인데도 100dvh 가 "Safari UI(주소창+탭바)를 뺀 높이"로
- * 잘못 계산되어, 하단 탭 아래로 130pt 가량 빈 공간이 생긴다.
- * html(height:100%) → body → shell 을 퍼센트 체인으로 이으면
- * ICB(실제 화면) 기준이라 이 버그를 타지 않는다.
- * 데스크톱 설치형(폰 프레임 레이아웃)은 건드리지 않도록 폭으로 한정한다.
- */
+/* 홈 화면 앱에서는 dvh 도 오염될 수 있어 퍼센트 체인으로 보강 */
 @media (display-mode: standalone) and (max-width: 767px) {
   .app-backdrop {
-    height: 100%;
     min-height: 100%;
   }
 
   .app-shell {
-    height: 100%;
+    min-height: 100%;
   }
 }
 
@@ -196,7 +193,12 @@ body {
   }
 
   .app-shell {
+    /* 넓은 화면에서만 폰 프레임 = 내부 스크롤 컨테이너가 된다 */
     height: min(940px, calc(100dvh - 3rem));
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
     border: 1px solid var(--border);
     border-radius: 2rem;
     box-shadow:
