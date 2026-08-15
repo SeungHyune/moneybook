@@ -2,11 +2,14 @@ import Link from "next/link";
 import { Pencil, Plus } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { CardStatementActions } from "@/components/card-statement-actions";
+import { MemberFilter } from "@/components/member-filter";
 import { MonthSwitcher } from "@/components/month-switcher";
+import { getMemberFilter } from "@/lib/member-filter";
 import { canManageAsset, requireHouseholdContext } from "@/lib/auth";
 import {
   getCardBillings,
   getFormOptions,
+  getHouseholdMembers,
   getTotalAssets,
   getUpcomingCardPayments,
 } from "@/lib/queries";
@@ -28,13 +31,24 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
       ? monthParam
       : toYearMonth(new Date());
 
-  const [billings, upcomingPayments, options, totalAssets] = await Promise.all([
-    getCardBillings(household.id, yearMonth),
-    // 신용카드는 "고른 달"이 아니라 "다음 결제일" 기준으로 보여준다
-    getUpcomingCardPayments(household.id),
-    getFormOptions(household.id),
-    getTotalAssets(household.id),
+  const [filterMember, members] = await Promise.all([
+    getMemberFilter(household.id),
+    getHouseholdMembers(household.id),
   ]);
+  const memberId = filterMember?.id ?? null;
+
+  const [billings, upcomingPayments, options, totalAssets] = await Promise.all([
+    getCardBillings(household.id, yearMonth, memberId),
+    // 신용카드는 "고른 달"이 아니라 "다음 결제일" 기준으로 보여준다
+    getUpcomingCardPayments(household.id, memberId),
+    getFormOptions(household.id),
+    getTotalAssets(household.id, memberId),
+  ]);
+
+  // 구성원 보기일 땐 그 사람 소유 계좌만
+  const visibleAccounts = memberId
+    ? options.accounts.filter((account) => account.ownerMemberId === memberId)
+    : options.accounts;
 
   const upcomingByCard = new Map(
     upcomingPayments.map((item) => [item.card.id, item]),
@@ -47,7 +61,13 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
   return (
     <>
       <AppHeader
-        title="카드 / 자산"
+        title={
+          <MemberFilter
+            householdName="카드 / 자산"
+            members={members}
+            selectedId={memberId}
+          />
+        }
         action={
           <Link
             href="/cards/new"
@@ -255,7 +275,7 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
         <section className="space-y-2">
           <h2 className="px-1 text-sm font-bold">계좌</h2>
 
-          {options.accounts.length === 0 ? (
+          {visibleAccounts.length === 0 ? (
             <EmptyBox
               message="등록된 계좌가 없어요."
               actionLabel="계좌 등록하기"
@@ -263,7 +283,7 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
             />
           ) : (
             <ul className="divide-y divide-border rounded-2xl border border-border bg-surface px-4">
-              {options.accounts.map((account) => (
+              {visibleAccounts.map((account) => (
                 <li
                   key={account.id}
                   className="flex items-center gap-3 py-3.5"

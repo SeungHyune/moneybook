@@ -11,8 +11,11 @@ import {
 } from "@/components/ui/skeleton";
 import { requireHouseholdContext } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { MemberFilter } from "@/components/member-filter";
+import { getMemberFilter } from "@/lib/member-filter";
 import {
   getCategoryBreakdown,
+  getHouseholdMembers,
   getMonthlySummary,
   getTransactions,
   getUpcomingCardPayments,
@@ -46,6 +49,13 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
   const householdId = household.id;
   const monthStartDay = household.monthStartDay;
 
+  // 헤더에서 고른 "누구 기준으로 볼지" (null = 전체 합산)
+  const [filterMember, members] = await Promise.all([
+    getMemberFilter(householdId),
+    getHouseholdMembers(householdId),
+  ]);
+  const memberId = filterMember?.id ?? null;
+
   // 처음 온 사용자거나(tutorialSeenAt 없음) "다시 보기"(/?tutorial=1)로 연 경우
   const forceTutorial = params.tutorial === "1";
   const showTutorial = forceTutorial || user.tutorialSeenAt === null;
@@ -54,7 +64,16 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
     <>
       {showTutorial && <TutorialOverlay forceOpen={forceTutorial} />}
 
-      <AppHeader title={household.name} showSettings />
+      <AppHeader
+        title={
+          <MemberFilter
+            householdName={household.name}
+            members={members}
+            selectedId={memberId}
+          />
+        }
+        showSettings
+      />
 
       <div className="space-y-4 px-4 py-4">
         <MonthSwitcher yearMonth={yearMonth} />
@@ -68,6 +87,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
             householdId={householdId}
             yearMonth={yearMonth}
             monthStartDay={monthStartDay}
+            memberId={memberId}
           />
         </Suspense>
 
@@ -76,7 +96,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
         </Suspense>
 
         <Suspense fallback={<SectionSkeleton rows={2} />}>
-          <CardBillingSection householdId={householdId} />
+          <CardBillingSection householdId={householdId} memberId={memberId} />
         </Suspense>
 
         <Suspense fallback={<SectionSkeleton rows={4} />}>
@@ -84,6 +104,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
             householdId={householdId}
             yearMonth={yearMonth}
             monthStartDay={monthStartDay}
+            memberId={memberId}
           />
         </Suspense>
 
@@ -92,6 +113,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
             householdId={householdId}
             yearMonth={yearMonth}
             monthStartDay={monthStartDay}
+            memberId={memberId}
           />
         </Suspense>
       </div>
@@ -126,12 +148,19 @@ async function SummarySection({
   householdId,
   yearMonth,
   monthStartDay,
+  memberId,
 }: {
   householdId: string;
   yearMonth: string;
   monthStartDay: number;
+  memberId: string | null;
 }) {
-  const summary = await getMonthlySummary(householdId, yearMonth, monthStartDay);
+  const summary = await getMonthlySummary(
+    householdId,
+    yearMonth,
+    monthStartDay,
+    memberId,
+  );
 
   return (
     <section className="rounded-2xl bg-primary p-5 text-primary-foreground">
@@ -232,8 +261,14 @@ async function UpcomingSection({ householdId }: { householdId: string }) {
  * 월 선택과 무관하게 "오늘 이후 가장 가까운 결제일"을 카드마다 따로 계산한다.
  * 결제일이 5일인 카드와 25일인 카드는 같은 날에도 기다리는 청구서가 다르다.
  */
-async function CardBillingSection({ householdId }: { householdId: string }) {
-  const payments = await getUpcomingCardPayments(householdId);
+async function CardBillingSection({
+  householdId,
+  memberId,
+}: {
+  householdId: string;
+  memberId: string | null;
+}) {
+  const payments = await getUpcomingCardPayments(householdId, memberId);
 
   const pending = payments.filter(
     (item) => item.total > 0 && !item.statement?.isPaid,
@@ -302,15 +337,18 @@ async function BreakdownSection({
   householdId,
   yearMonth,
   monthStartDay,
+  memberId,
 }: {
   householdId: string;
   yearMonth: string;
   monthStartDay: number;
+  memberId: string | null;
 }) {
   const breakdown = await getCategoryBreakdown(
     householdId,
     yearMonth,
     monthStartDay,
+    memberId,
   );
 
   if (breakdown.length === 0) return null;
@@ -352,15 +390,18 @@ async function RecentSection({
   householdId,
   yearMonth,
   monthStartDay,
+  memberId,
 }: {
   householdId: string;
   yearMonth: string;
   monthStartDay: number;
+  memberId: string | null;
 }) {
   const recent = await getTransactions(householdId, {
     yearMonth,
     monthStartDay,
     take: 5,
+    payerMemberId: memberId,
   });
 
   return (

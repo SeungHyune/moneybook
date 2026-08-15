@@ -33,11 +33,12 @@ export function getMonthRange(yearMonth: string, monthStartDay: number) {
 
 export type MonthlySummary = Awaited<ReturnType<typeof getMonthlySummary>>;
 
-/** 한 달 수입/지출/남은돈 */
+/** 한 달 수입/지출/남은돈. memberId 를 주면 그 사람이 결제한 것만 */
 export async function getMonthlySummary(
   householdId: string,
   yearMonth: string,
   monthStartDay: number,
+  memberId?: string | null,
 ) {
   const { start, end } = getMonthRange(yearMonth, monthStartDay);
 
@@ -47,6 +48,7 @@ export async function getMonthlySummary(
       householdId,
       occurredAt: { gte: start, lte: end },
       excludeFromStats: false,
+      ...(memberId ? { payerMemberId: memberId } : {}),
     },
     _sum: { amount: true },
     _count: true,
@@ -69,11 +71,12 @@ export async function getMonthlySummary(
   };
 }
 
-/** 카테고리별 지출 (많은 순) */
+/** 카테고리별 지출 (많은 순). memberId 를 주면 그 사람이 결제한 것만 */
 export async function getCategoryBreakdown(
   householdId: string,
   yearMonth: string,
   monthStartDay: number,
+  memberId?: string | null,
 ) {
   const { start, end } = getMonthRange(yearMonth, monthStartDay);
 
@@ -84,6 +87,7 @@ export async function getCategoryBreakdown(
       type: "EXPENSE",
       occurredAt: { gte: start, lte: end },
       excludeFromStats: false,
+      ...(memberId ? { payerMemberId: memberId } : {}),
     },
     _sum: { amount: true },
   });
@@ -119,9 +123,18 @@ export type CardBilling = Awaited<ReturnType<typeof getCardBillings>>[number];
  * 카드별 이번 달 청구 예정액.
  * 일시불과 할부를 나눠서 보여준다 — "이번 달 25일에 얼마 나가는지"가 핵심.
  */
-export async function getCardBillings(householdId: string, yearMonth: string) {
+export async function getCardBillings(
+  householdId: string,
+  yearMonth: string,
+  memberId?: string | null,
+) {
   const cards = await prisma.card.findMany({
-    where: { householdId, isActive: true },
+    where: {
+      householdId,
+      isActive: true,
+      // 구성원 보기: 그 사람 소유 카드만
+      ...(memberId ? { ownerMemberId: memberId } : {}),
+    },
     include: {
       ownerMember: { select: { displayName: true, color: true } },
       paymentAccount: { select: { name: true, bankName: true } },
@@ -232,13 +245,17 @@ export type UpcomingCardPayment = Awaited<
  * 결제일을 카드마다 따로 계산한다. 결제일이 5일인 카드와 25일인 카드는
  * 같은 날에도 서로 다른 달의 청구서를 기다리고 있기 때문이다.
  */
-export async function getUpcomingCardPayments(householdId: string) {
+export async function getUpcomingCardPayments(
+  householdId: string,
+  memberId?: string | null,
+) {
   const cards = await prisma.card.findMany({
     where: {
       householdId,
       isActive: true,
       type: "CREDIT",
       billingDay: { not: null },
+      ...(memberId ? { ownerMemberId: memberId } : {}),
     },
     include: {
       ownerMember: { select: { displayName: true } },
@@ -405,6 +422,7 @@ export async function getTransactions(
     type,
     cardId,
     categoryId,
+    payerMemberId,
   }: {
     yearMonth?: string;
     monthStartDay: number;
@@ -413,6 +431,8 @@ export async function getTransactions(
     type?: "INCOME" | "EXPENSE" | "TRANSFER";
     cardId?: string;
     categoryId?: string;
+    /** 구성원 보기: 이 사람이 결제한 것만 */
+    payerMemberId?: string | null;
   },
 ) {
   const range = yearMonth ? getMonthRange(yearMonth, monthStartDay) : null;
@@ -424,6 +444,7 @@ export async function getTransactions(
       ...(type ? { type } : {}),
       ...(cardId ? { cardId } : {}),
       ...(categoryId ? { categoryId } : {}),
+      ...(payerMemberId ? { payerMemberId } : {}),
     },
     include: {
       category: { select: { name: true, icon: true, color: true } },
@@ -492,14 +513,42 @@ export async function getFormOptions(householdId: string) {
   return { categories, cards, accounts, members };
 }
 
-/** 총 자산 (계좌 잔액 합) */
-export async function getTotalAssets(householdId: string) {
+/** 총 자산 (계좌 잔액 합). memberId 를 주면 그 사람 소유 계좌만 */
+export async function getTotalAssets(
+  householdId: string,
+  memberId?: string | null,
+) {
   const result = await prisma.account.aggregate({
-    where: { householdId, isActive: true },
+    where: {
+      householdId,
+      isActive: true,
+      ...(memberId ? { ownerMemberId: memberId } : {}),
+    },
     _sum: { balance: true },
   });
 
   return result._sum.balance ?? 0;
+}
+
+/** 헤더 구성원 선택기에 쓰는 가벼운 구성원 목록 */
+export async function getHouseholdMembers(householdId: string) {
+  const members = await prisma.householdMember.findMany({
+    where: { householdId },
+    orderBy: { joinedAt: "asc" },
+    select: {
+      id: true,
+      displayName: true,
+      color: true,
+      user: { select: { nickname: true } },
+    },
+  });
+
+  return members.map((member) => ({
+    id: member.id,
+    displayName: member.displayName,
+    color: member.color,
+    nickname: member.user.nickname,
+  }));
 }
 
 /** 다가오는 고정지출 (오늘 이후 7일 이내) — 홈 화면 알림용 */

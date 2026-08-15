@@ -1,9 +1,15 @@
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
+import { MemberFilter } from "@/components/member-filter";
 import { MonthSwitcher } from "@/components/month-switcher";
 import { TransactionRow } from "@/components/transaction-row";
 import { requireHouseholdContext } from "@/lib/auth";
-import { getMonthlySummary, getTransactions } from "@/lib/queries";
+import { getMemberFilter } from "@/lib/member-filter";
+import {
+  getHouseholdMembers,
+  getMonthlySummary,
+  getTransactions,
+} from "@/lib/queries";
 import { formatRelativeDate, formatWon, toYearMonth } from "@/lib/utils";
 
 export const metadata = { title: "내역" };
@@ -33,13 +39,25 @@ export default async function TransactionsPage({
       ? typeParam
       : undefined;
 
+  const [filterMember, members] = await Promise.all([
+    getMemberFilter(household.id),
+    getHouseholdMembers(household.id),
+  ]);
+  const memberId = filterMember?.id ?? null;
+
   const [summary, transactions] = await Promise.all([
-    getMonthlySummary(household.id, yearMonth, household.monthStartDay),
+    getMonthlySummary(
+      household.id,
+      yearMonth,
+      household.monthStartDay,
+      memberId,
+    ),
     getTransactions(household.id, {
       yearMonth,
       monthStartDay: household.monthStartDay,
       type,
       take: 200,
+      payerMemberId: memberId,
     }),
   ]);
 
@@ -54,7 +72,16 @@ export default async function TransactionsPage({
 
   return (
     <>
-      <AppHeader title="내역" showSettings />
+      <AppHeader
+        title={
+          <MemberFilter
+            householdName="내역"
+            members={members}
+            selectedId={memberId}
+          />
+        }
+        showSettings
+      />
 
       <div className="space-y-4 px-4 py-4">
         <MonthSwitcher yearMonth={yearMonth} />
