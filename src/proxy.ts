@@ -19,6 +19,8 @@ const PUBLIC_PATHS = [
   "/sw.js",
   // 세션이 아니라 자체 시크릿으로 인증하는 API (Vercel Cron)
   "/api/cron",
+  // 뷰포트 진단용 임시 페이지 (iOS 26 하단 갭 조사)
+  "/debug",
 ];
 
 function isPublicPath(pathname: string) {
