@@ -162,6 +162,25 @@ body {
   overscroll-behavior: contain;
 }
 
+/*
+ * iOS 홈 화면 앱(WebKit) 버그 대응.
+ * standalone 모드인데도 100dvh 가 "Safari UI(주소창+탭바)를 뺀 높이"로
+ * 잘못 계산되어, 하단 탭 아래로 130pt 가량 빈 공간이 생긴다.
+ * html(height:100%) → body → shell 을 퍼센트 체인으로 이으면
+ * ICB(실제 화면) 기준이라 이 버그를 타지 않는다.
+ * 데스크톱 설치형(폰 프레임 레이아웃)은 건드리지 않도록 폭으로 한정한다.
+ */
+@media (display-mode: standalone) and (max-width: 767px) {
+  .app-backdrop {
+    height: 100%;
+    min-height: 100%;
+  }
+
+  .app-shell {
+    height: 100%;
+  }
+}
+
 @media (min-width: 768px) {
   .app-backdrop {
     align-items: center;
