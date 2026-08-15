@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { ScrollReset } from "@/components/scroll-reset";
 import { ServiceWorkerRegister } from "@/components/service-worker-register";
 import "./globals.css";
 
@@ -105,6 +106,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <span className="app-splash-mark">₩</span>
         </div>
 
+        <ScrollReset />
         <ServiceWorkerRegister />
       </body>
     </html>
