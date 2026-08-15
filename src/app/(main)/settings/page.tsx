@@ -123,6 +123,11 @@ export default async function SettingsPage() {
 
         <p className="pb-4 text-center text-xs text-muted">
           우리집 가계부 v0.1.0
+          {" · "}
+          {/* iOS 26 하단 갭 조사용 임시 링크 — 원인 확정되면 제거 */}
+          <Link href="/debug" className="underline underline-offset-2">
+            진단
+          </Link>
         </p>
       </div>
     </>
