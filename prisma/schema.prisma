@@ -131,7 +131,72 @@ model User {
   /// 마지막으로 보고 있던 가구 (여러 가구에 속할 수 있으므로)
   lastHouseholdId String?           @db.Uuid
 
+  /// 자동 수집용 개인 토큰. MacroDroid/단축어가 /api/ingest 를 호출할 때 쓴다.
+  ingestToken String? @unique
+
+  pushSubscriptions PushSubscription[]
+  inboxItems        IngestInbox[]
+
   @@map("users")
+}
+
+/// 웹푸시 구독. 기기(브라우저)마다 하나씩 생긴다.
+model PushSubscription {
+  id       String @id @default(uuid()) @db.Uuid
+  userId   String @db.Uuid
+  /// 푸시 서비스가 발급한 주소. 이게 곧 기기 식별자다.
+  endpoint String @unique
+  p256dh   String
+  auth     String
+
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+enum IngestStatus {
+  PENDING //  확인 대기
+  CONFIRMED //  거래로 등록됨
+  DISCARDED //  버림
+}
+
+/// 자동 수집 수신함.
+/// MacroDroid(안드로이드 알림) / iOS 단축어(문자)가 보낸 원문과 파싱 결과를 담는다.
+/// 카드가 매칭되면 거래가 자동 생성되고, 아니면 PENDING 으로 남아 사람이 확인한다.
+model IngestInbox {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+
+  rawText  String
+  /// 같은 알림이 두 번 와도 중복 저장되지 않게 (원문 해시)
+  textHash String
+  source   String? //  "macrodroid" | "shortcut" | "paste"
+
+  // --- 파싱 결과 스냅샷 ---
+  amount            Int?
+  merchant          String?
+  occurredAt        DateTime?
+  cardLast4         String?
+  installmentMonths Int       @default(1)
+  isCancel          Boolean   @default(false)
+  /// last4 로 매칭된 카드
+  cardId            String?   @db.Uuid
+
+  status        IngestStatus @default(PENDING)
+  /// 자동/수동 등록된 거래
+  transactionId String?      @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, textHash])
+  @@index([userId, status])
+  @@map("ingest_inbox")
 }
 
 /// 가계부 공간. 부부가 함께 쓰는 단위.

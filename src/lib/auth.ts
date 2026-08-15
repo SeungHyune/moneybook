@@ -30,18 +30,22 @@ export const getCurrentUser = cache(async () => {
       ? (meta.provider_id ?? meta.sub ?? null)
       : null;
 
+  // 이메일 미동의 카카오 계정은 email 이 빈 문자열로 온다.
+  // User.email 은 unique 라 "" 가 두 명이면 두 번째 가입이 터진다 → null 로 정규화.
+  const email = authUser.email || null;
+
   // 첫 로그인이면 프로필을 만들고, 이미 있으면 카카오 프로필 변경분만 반영한다.
   return prisma.user.upsert({
     where: { id: authUser.id },
     create: {
       id: authUser.id,
-      email: authUser.email ?? null,
+      email,
       nickname,
       avatarUrl,
       kakaoId: kakaoId ? String(kakaoId) : null,
     },
     update: {
-      email: authUser.email ?? null,
+      email,
       avatarUrl,
     },
   });

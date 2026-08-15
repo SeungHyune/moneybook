@@ -96,18 +96,32 @@ export type EditableTransaction = {
   excludeFromStats: boolean;
 };
 
+/** 자동 수집함에서 넘어올 때 미리 채울 값 */
+export type TransactionInitial = {
+  inboxId: string;
+  amount: number | null;
+  merchant: string | null;
+  occurredAt: Date | null;
+  cardId: string | null;
+  installmentMonths: number;
+  rawText: string;
+};
+
 export function TransactionForm({
   householdId,
   currentMemberId,
   options,
   defaultType = "EXPENSE",
   transaction,
+  initial,
 }: {
   householdId: string;
   currentMemberId: string;
   options: Options;
   defaultType?: TransactionType;
   transaction?: EditableTransaction;
+  /** 수신함 항목 기반 초기값 (등록 모드에서만) */
+  initial?: TransactionInitial;
 }) {
   const router = useRouter();
 
@@ -125,16 +139,22 @@ export function TransactionForm({
     transaction?.paymentMethod ??
       (defaultType === "INCOME" ? "BANK_TRANSFER" : "CARD"),
   );
-  const [cardId, setCardId] = useState(transaction?.cardId ?? "");
+  const [cardId, setCardId] = useState(
+    transaction?.cardId ?? initial?.cardId ?? "",
+  );
   const [installmentMonths, setInstallmentMonths] = useState(
-    transaction?.installmentMonths ?? 1,
+    transaction?.installmentMonths ?? initial?.installmentMonths ?? 1,
   );
   const [isInterestFree, setIsInterestFree] = useState(
     transaction?.isInterestFree ?? true,
   );
   const [categoryId, setCategoryId] = useState(transaction?.categoryId ?? "");
+
+  const initialAmount = transaction?.amount ?? initial?.amount ?? null;
   const [amountText, setAmountText] = useState(
-    transaction ? new Intl.NumberFormat("ko-KR").format(transaction.amount) : "",
+    initialAmount !== null
+      ? new Intl.NumberFormat("ko-KR").format(initialAmount)
+      : "",
   );
 
   const amount = Number(amountText.replace(/[^\d]/g, "")) || 0;
@@ -189,6 +209,7 @@ export function TransactionForm({
       {transaction && (
         <input type="hidden" name="transactionId" value={transaction.id} />
       )}
+      {initial && <input type="hidden" name="inboxId" value={initial.inboxId} />}
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="amount" value={amount} />
       <input type="hidden" name="paymentMethod" value={paymentMethod} />
@@ -247,6 +268,13 @@ export function TransactionForm({
       </header>
 
       <div className="space-y-5 px-4 py-4">
+        {/* 자동 수집 원문 — 파싱이 맞는지 대조용 */}
+        {initial && (
+          <p className="line-clamp-3 rounded-xl bg-surface-muted px-3 py-2.5 text-[11px] leading-relaxed text-muted">
+            {initial.rawText}
+          </p>
+        )}
+
         {/* 수입/지출/이체 */}
         <div className="grid grid-cols-3 gap-1 rounded-xl bg-surface-muted p-1">
           {TYPE_TABS.map((tab) => (
@@ -300,7 +328,9 @@ export function TransactionForm({
             type="datetime-local"
             name="occurredAt"
             required
-            defaultValue={toLocalInputValue(transaction?.occurredAt ?? new Date())}
+            defaultValue={toLocalInputValue(
+              transaction?.occurredAt ?? initial?.occurredAt ?? new Date(),
+            )}
           />
         </Field>
 
@@ -310,7 +340,7 @@ export function TransactionForm({
             name="merchant"
             placeholder={type === "INCOME" ? "회사 이름 등" : "가게 이름"}
             maxLength={60}
-            defaultValue={transaction?.merchant ?? ""}
+            defaultValue={transaction?.merchant ?? initial?.merchant ?? ""}
             autoComplete="off"
           />
         </Field>

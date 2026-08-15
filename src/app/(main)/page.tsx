@@ -9,6 +9,7 @@ import {
   SummarySkeleton,
 } from "@/components/ui/skeleton";
 import { requireHouseholdContext } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import {
   getCategoryBreakdown,
   getMonthlySummary,
@@ -32,7 +33,7 @@ import {
  * DB 왕복이 겹치면 그동안 빈 화면이라 느리게 느껴졌다.
  */
 export default async function HomePage({ searchParams }: PageProps<"/">) {
-  const { household } = await requireHouseholdContext();
+  const { household, user } = await requireHouseholdContext();
 
   const params = await searchParams;
   const monthParam = params.month;
@@ -50,6 +51,10 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
 
       <div className="space-y-4 px-4 py-4">
         <MonthSwitcher yearMonth={yearMonth} />
+
+        <Suspense fallback={null}>
+          <InboxBanner userId={user.id} />
+        </Suspense>
 
         <Suspense fallback={<SummarySkeleton />}>
           <SummarySection
@@ -90,6 +95,25 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
 // ---------------------------------------------------------------------------
 // 섹션들
 // ---------------------------------------------------------------------------
+
+/** 자동 수집함에 확인할 게 있으면 알려준다 */
+async function InboxBanner({ userId }: { userId: string }) {
+  const count = await prisma.ingestInbox.count({
+    where: { userId, status: "PENDING" },
+  });
+
+  if (count === 0) return null;
+
+  return (
+    <Link
+      href="/inbox"
+      className="flex items-center justify-between gap-2 rounded-2xl bg-warning/10 px-4 py-3 text-sm font-medium text-warning transition active:brightness-95"
+    >
+      <span>확인할 자동 수집 내역 {count}건</span>
+      <ArrowRight className="size-4 shrink-0" />
+    </Link>
+  );
+}
 
 async function SummarySection({
   householdId,

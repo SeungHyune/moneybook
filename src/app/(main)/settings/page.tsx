@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ChevronRight, LogOut, Users } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { HouseholdSettingsForm } from "@/components/household-settings-form";
+import { IngestSettings } from "@/components/ingest-settings";
+import { NotificationSettings } from "@/components/notification-settings";
 import { ThemeSelector } from "@/components/theme-selector";
 import { requireHouseholdContext } from "@/lib/auth";
 import { MEMBER_ROLE_LABEL } from "@/lib/labels";
@@ -60,6 +62,12 @@ export default async function SettingsPage() {
           </div>
           <ChevronRight className="size-5 shrink-0 text-muted" />
         </Link>
+
+        {/* 푸시 알림 */}
+        <NotificationSettings />
+
+        {/* 자동 수집 (안드로이드 MacroDroid / iOS 단축어) */}
+        <IngestSettings token={user.ingestToken} />
 
         {/* 화면 테마 */}
         <ThemeSelector />

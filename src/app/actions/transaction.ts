@@ -6,6 +6,10 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth";
 import { buildInstallmentSchedule } from "@/lib/billing";
+import {
+  insertTransactionWithEffects,
+  resolveCardEffect,
+} from "@/lib/record-transaction";
 import type { ActionState } from "./household";
 
 const transactionSchema = z
@@ -56,51 +60,6 @@ const transactionSchema = z
 /** 빈 문자열을 null 로 바꿔주는 헬퍼 (form 에서 미선택은 "" 로 들어온다) */
 function nullify(value: string | undefined) {
   return value && value.length > 0 ? value : null;
-}
-
-/**
- * 카드 종류에 따라 "계좌에서 즉시 빠지는지"와 "할부가 되는지"를 정리한다.
- * 등록과 수정이 같은 규칙을 쓰도록 한 곳에 모아 뒀다.
- *
- *   신용   : 결제일에 청구 → accountId 없음, 할부 가능
- *   체크   : 즉시 출금    → 연결 계좌를 accountId 로, 할부 없음
- *   선불   : 충전액에서   → accountId 없음, 할부 없음
- */
-function resolveCardEffect({
-  card,
-  requestedAccountId,
-  requestedInstallments,
-}: {
-  card: { type: "CREDIT" | "DEBIT" | "PREPAID"; paymentAccountId: string | null } | null;
-  requestedAccountId: string | null;
-  requestedInstallments: number;
-}) {
-  if (!card) {
-    return {
-      accountId: requestedAccountId,
-      installmentMonths: 1,
-      isCreditCard: false,
-    };
-  }
-
-  if (card.type === "CREDIT") {
-    return {
-      accountId: null,
-      installmentMonths: requestedInstallments,
-      isCreditCard: true,
-    };
-  }
-
-  if (card.type === "DEBIT") {
-    return {
-      accountId: card.paymentAccountId ?? requestedAccountId,
-      installmentMonths: 1,
-      isCreditCard: false,
-    };
-  }
-
-  // PREPAID
-  return { accountId: null, installmentMonths: 1, isCreditCard: false };
 }
 
 /** 거래 한 건이 계좌 잔액에 준 영향 (양수면 잔액이 늘어야 한다) */
@@ -158,88 +117,48 @@ export async function createTransaction(
    * 그러면 잔액 반영/원복이 "거래에 적힌 계좌"만 보고 처리돼서 어긋나지 않고,
    * 내역에서도 어느 통장에서 나갔는지 보여줄 수 있다.
    */
-  const { accountId, installmentMonths, isCreditCard } = resolveCardEffect({
+  const { accountId, installmentMonths } = resolveCardEffect({
     card,
     requestedAccountId: nullify(data.accountId),
     requestedInstallments,
   });
 
+  // 자동 수집함에서 넘어온 경우, 등록되면 그 항목을 처리 완료로 표시한다
+  const inboxId = nullify(raw.inboxId);
+
   await prisma.$transaction(async (tx) => {
-    const created = await tx.transaction.create({
-      data: {
-        householdId: data.householdId,
-        type: data.type,
-        amount: data.amount,
-        occurredAt: data.occurredAt,
-        merchant: nullify(data.merchant),
-        memo: nullify(data.memo),
-        categoryId: nullify(data.categoryId),
-        paymentMethod: data.paymentMethod,
-        cardId,
-        accountId,
-        toAccountId,
-        installmentMonths,
-        isInterestFree: data.isInterestFree,
-        interestAmount: data.isInterestFree ? 0 : data.interestAmount,
-        approvalNo: nullify(data.approvalNo),
-        payerMemberId: nullify(data.payerMemberId) ?? member.id,
-        createdByMemberId: member.id,
-        isShared: data.isShared,
-        excludeFromStats: data.excludeFromStats,
-      },
+    const created = await insertTransactionWithEffects(tx, {
+      householdId: data.householdId,
+      type: data.type,
+      amount: data.amount,
+      occurredAt: data.occurredAt,
+      merchant: nullify(data.merchant),
+      memo: nullify(data.memo),
+      categoryId: nullify(data.categoryId),
+      paymentMethod: data.paymentMethod,
+      card,
+      accountId,
+      toAccountId,
+      installmentMonths,
+      isInterestFree: data.isInterestFree,
+      interestAmount: data.interestAmount,
+      approvalNo: nullify(data.approvalNo),
+      payerMemberId: nullify(data.payerMemberId) ?? member.id,
+      createdByMemberId: member.id,
+      isShared: data.isShared,
+      excludeFromStats: data.excludeFromStats,
     });
 
-    // 신용카드만 청구 스케줄을 만든다.
-    // 일시불도 1회차짜리로 남겨야 "이번 달 카드값"을 한 번에 계산할 수 있다.
-    if (card && isCreditCard && data.type === "EXPENSE") {
-      const rounds = buildInstallmentSchedule({
-        amount: data.amount,
-        months: installmentMonths,
-        purchaseDate: data.occurredAt,
-        card,
-        interestAmount: data.isInterestFree ? 0 : data.interestAmount,
-      });
-
-      await tx.installmentPlan.createMany({
-        data: rounds.map((round) => ({
-          transactionId: created.id,
-          round: round.round,
-          totalRounds: round.totalRounds,
-          amount: round.amount,
-          interest: round.interest,
-          billingDate: round.billingDate,
-        })),
-      });
-    }
-
-    // accountId 가 남아 있으면 그 계좌에서 즉시 빠지는(또는 들어오는) 건이다.
-    // 신용/선불카드는 위에서 accountId 를 비웠으므로 여기 걸리지 않는다.
-    if (data.type === "TRANSFER") {
-      if (accountId) {
-        await tx.account.update({
-          where: { id: accountId },
-          data: { balance: { decrement: data.amount } },
-        });
-      }
-      if (toAccountId) {
-        await tx.account.update({
-          where: { id: toAccountId },
-          data: { balance: { increment: data.amount } },
-        });
-      }
-    } else if (accountId) {
-      await tx.account.update({
-        where: { id: accountId },
-        data:
-          data.type === "INCOME"
-            ? { balance: { increment: data.amount } }
-            : { balance: { decrement: data.amount } },
+    if (inboxId) {
+      await tx.ingestInbox.updateMany({
+        where: { id: inboxId, userId: member.userId, status: "PENDING" },
+        data: { status: "CONFIRMED", transactionId: created.id },
       });
     }
   });
 
   revalidatePath("/", "layout");
-  redirect("/transactions");
+  redirect(inboxId ? "/inbox" : "/transactions");
 }
 
 const updateSchema = transactionSchema.safeExtend({
