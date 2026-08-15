@@ -4,38 +4,6 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 
-/**
- * 자동 수집 토큰 발급/재발급.
- * 재발급하면 이전 토큰은 즉시 무효가 된다 (기기 분실 시 이걸 누르면 된다).
- */
-export async function regenerateIngestToken() {
-  const user = await requireUser();
-
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  const token = Buffer.from(bytes).toString("base64url");
-
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { ingestToken: token },
-  });
-
-  revalidatePath("/settings");
-  return { token };
-}
-
-export async function disableIngestToken() {
-  const user = await requireUser();
-
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { ingestToken: null },
-  });
-
-  revalidatePath("/settings");
-  return { success: true };
-}
-
 /** 수신함 항목 버리기 */
 export async function discardInboxItem(inboxId: string) {
   const user = await requireUser();

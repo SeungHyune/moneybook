@@ -17,8 +17,7 @@ const PUBLIC_PATHS = [
   "/offline",
   "/manifest.json",
   "/sw.js",
-  // 세션이 아니라 자체 토큰으로 인증하는 API 들
-  "/api/ingest",
+  // 세션이 아니라 자체 시크릿으로 인증하는 API (Vercel Cron)
   "/api/cron",
 ];
 

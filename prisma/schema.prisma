@@ -131,9 +131,6 @@ model User {
   /// 마지막으로 보고 있던 가구 (여러 가구에 속할 수 있으므로)
   lastHouseholdId String?           @db.Uuid
 
-  /// 자동 수집용 개인 토큰. MacroDroid/단축어가 /api/ingest 를 호출할 때 쓴다.
-  ingestToken String? @unique
-
   pushSubscriptions PushSubscription[]
   inboxItems        IngestInbox[]
 
