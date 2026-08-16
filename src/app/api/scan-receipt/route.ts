@@ -87,7 +87,7 @@ export async function POST(request: Request) {
     );
 
     const summary = [
-      "📷 영수증",
+      "📷",
       item.merchant ?? "가맹점 미확인",
       `${item.amount.toLocaleString("ko-KR")}원`,
       item.date ?? "",

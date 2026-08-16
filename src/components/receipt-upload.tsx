@@ -127,7 +127,7 @@ export function ReceiptUpload() {
         ) : (
           <>
             <Camera className="size-4" />
-            영수증·결제내역 찍어서 올리기
+            영수증·주문내역 찍어서 올리기
           </>
         )}
       </button>

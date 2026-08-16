@@ -24,32 +24,44 @@ export type ScannedTransaction = {
 
 const DEFAULT_MODEL = "gemini-3.1-flash-lite";
 
-const PROMPT = `이미지를 보고 판별부터 하라. 영수증이나 카드/페이/은행 앱의 결제·거래내역 화면일 수도 있고, 전혀 무관한 사진일 수도 있다.
+const PROMPT = `이미지를 보고 판별부터 하라. 다음 중 하나일 수 있다:
+- receipt: 종이/전자 영수증
+- payment_list: 카드·페이·은행 앱의 결제/거래 내역 목록 화면
+- order_history: 쇼핑몰·페이 서비스의 주문내역/주문상세/결제상세 화면
+  (네이버페이, 토스, 카카오페이, 마켓컬리, 무신사, 쿠팡, 배민 등)
+- other: 위 어느 것도 아닌 무관한 이미지
 
 절대 규칙 (가장 중요):
 - 이미지에 실제로 인쇄/표시된 글자에서만 추출한다. 보이지 않는 금액·상호·날짜를 추측하거나 지어내는 것은 금지다.
-- 영수증도 결제내역도 아니면 imageType 을 "other" 로 하고 transactions 는 빈 배열로 둔다.
+- other 면 transactions 는 빈 배열로 둔다.
 - 금액 숫자가 또렷하게 보이지 않는 건은 아예 넣지 않는다.
+- 각 필드는 이미지에서 실제로 읽힌 경우에만 채운다. 못 읽었으면 null 로 둔다 —
+  빈 칸을 그럴듯한 값으로 메우지 마라. (amount 만 필수, 나머지는 전부 선택이다)
 
 추출 규칙:
-- "결제 건" 단위로 추출한다. 한 영수증에 여러 상품이 있어도 결제는 한 건이다 —
-  합계 금액 한 건으로 만들고, 상품명들은 memo 에 요약한다 (예: "아메리카노 외 2건").
-- 결제내역 목록 캡처처럼 서로 다른 결제가 여러 건 보이면 각각 별도 건으로 추출한다.
-- amount 는 원 단위 정수. 합계/총액을 쓰고, 할인 반영된 실결제액을 우선한다.
-- merchant: 상호명은 보통 영수증 맨 위의 큰 글씨다. 이미지에 보이면 그대로 넣는다.
+- "결제 건" 단위로 추출한다. 한 영수증/한 주문에 상품이 여러 개여도 결제는 한 건이다 —
+  실제 결제된 총액("총 결제금액", "최종 결제 금액", "합계") 한 건으로 만들고,
+  상품명들은 memo 에 요약한다 (예: "유기농 우유 외 2건").
+- 배송비·할인·포인트가 섞여 있으면 실제로 빠져나간 최종 결제액을 amount 로 쓴다.
+- 목록 화면(결제내역·주문내역)에 서로 다른 건이 여러 개 보이면 각각 별도 건으로 추출한다.
+- merchant: 실제 가맹점/판매처 이름을 우선한다 (네이버페이 결제상세의 가맹점명 등).
+  가맹점명이 없으면 서비스 이름(마켓컬리, 무신사, 쿠팡...)을 쓴다.
+  영수증이라면 보통 맨 위의 큰 글씨가 상호명이다.
+- 결제 수단 문구(네이버페이, 토스페이, 카카오페이, OO카드 등)가 보이면
+  memo 끝에 " · 네이버페이" 처럼 덧붙인다.
 - "신한카드(1091)" "KB국민 1234" 처럼 카드 표기가 보이면 숫자 4자리를 cardLast4 에 넣는다.
 - 할부 표기("3개월" 등)가 있으면 installmentMonths 에 넣는다. 일시불이면 null.
-- 날짜/시간이 안 보이면 null. 연도가 없으면 "MM-DD" 형식으로.
-- 결제 취소/환불 건은 제외한다.`;
+- 날짜/시간이 안 보이면 null. 연도가 없으면 "MM-DD" 형식으로. ("2026.08.10" 같은 점 표기도 날짜다)
+- 취소/환불 건 제외: "주문취소", "취소완료", "반품", "환불" 표시가 붙은 건은 넣지 않는다.`;
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
   properties: {
     imageType: {
       type: "STRING",
-      enum: ["receipt", "payment_list", "other"],
+      enum: ["receipt", "payment_list", "order_history", "other"],
       description:
-        "영수증이면 receipt, 결제내역 목록 캡처면 payment_list, 둘 다 아니면 other",
+        "영수증 receipt / 결제내역 목록 payment_list / 쇼핑 주문내역·결제상세 order_history / 무관 other",
     },
     transactions: {
       type: "ARRAY",
@@ -57,14 +69,28 @@ const RESPONSE_SCHEMA = {
         type: "OBJECT",
         properties: {
           amount: { type: "INTEGER", description: "결제 금액 (원)" },
-          merchant: { type: "STRING", nullable: true },
+          merchant: {
+            type: "STRING",
+            nullable: true,
+            description:
+              "가맹점/판매처/서비스 이름. 화면 상단의 브랜드명(마켓컬리 등)도 해당",
+          },
           date: { type: "STRING", nullable: true },
           time: { type: "STRING", nullable: true },
-          memo: { type: "STRING", nullable: true },
+          memo: {
+            type: "STRING",
+            nullable: true,
+            description: "상품명 요약 + 보이면 결제수단 (예: 반팔 티셔츠 · 토스페이)",
+          },
           cardLast4: { type: "STRING", nullable: true },
           installmentMonths: { type: "INTEGER", nullable: true },
+          isCanceled: {
+            type: "BOOLEAN",
+            description:
+              "이 건에 취소/취소완료/반품/환불 표시가 있으면 true, 정상 결제면 false",
+          },
         },
-        required: ["amount"],
+        required: ["amount", "isCanceled"],
       },
     },
   },
@@ -153,6 +179,9 @@ export async function scanReceiptImage(
         const item = raw as Record<string, unknown>;
         const amount = Number(item.amount);
         if (!Number.isFinite(amount) || amount <= 0) return null;
+
+        // 취소/환불 건은 버린다 (스키마로 건마다 판정을 강제했다)
+        if (item.isCanceled === true) return null;
 
         const str = (value: unknown) =>
           typeof value === "string" && value.trim() ? value.trim() : null;
