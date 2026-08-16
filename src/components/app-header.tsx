@@ -20,7 +20,18 @@ export function AppHeader({
     >
       <div className="flex h-14 items-center justify-between gap-2 px-4">
         <div className="min-w-0">
-          <h1 className="truncate text-lg font-bold tracking-tight">{title}</h1>
+          {/*
+            문자열 제목만 truncate 되는 h1 로 감싼다.
+            컴포넌트 제목(구성원 선택기 등)을 h1(truncate = overflow hidden)에
+            넣으면 드롭다운 패널이 잘려서 안 보인다 — 그대로 렌더한다.
+          */}
+          {typeof title === "string" ? (
+            <h1 className="truncate text-lg font-bold tracking-tight">
+              {title}
+            </h1>
+          ) : (
+            title
+          )}
           {subtitle && (
             <p className="truncate text-xs text-muted">{subtitle}</p>
           )}
