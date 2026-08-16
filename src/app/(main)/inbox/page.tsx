@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft, Inbox } from "lucide-react";
 import { DiscardInboxButton, PasteIngestForm } from "@/components/inbox-actions";
+import { ReceiptUpload } from "@/components/receipt-upload";
 import { requireHouseholdContext } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { formatRelativeDate, formatWon } from "@/lib/utils";
@@ -47,6 +48,7 @@ export default async function InboxPage() {
       </header>
 
       <div className="space-y-4 px-4 py-4">
+        <ReceiptUpload />
         <PasteIngestForm />
 
         {pending.length === 0 ? (

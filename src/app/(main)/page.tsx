@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { ArrowRight, CalendarClock, CreditCard } from "lucide-react";
+import { ArrowRight, CalendarClock, Camera, CreditCard } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { MonthSwitcher } from "@/components/month-switcher";
 import { TransactionRow } from "@/components/transaction-row";
@@ -71,6 +71,15 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
             members={members}
             selectedId={memberId}
           />
+        }
+        action={
+          <Link
+            href="/inbox"
+            aria-label="영수증 스캔 / 자동 수집함"
+            className="flex size-9 items-center justify-center rounded-full text-muted transition active:bg-surface-muted"
+          >
+            <Camera className="size-5" />
+          </Link>
         }
         showSettings
       />
