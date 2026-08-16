@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useOptimistic, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, Loader2, Users } from "lucide-react";
 import { setMemberFilter } from "@/app/actions/member-filter";
@@ -34,16 +34,9 @@ export function MemberFilter({
 
   /*
    * 낙관적 선택: 서버 반영을 기다리지 않고 헤더 표시를 먼저 바꾼다.
-   * undefined = 낙관값 없음(서버값 사용). 서버값이 갱신되면 낙관값을 비운다.
+   * 전환이 끝나면 자동으로 서버값(selectedId)으로 돌아간다.
    */
-  const [optimisticId, setOptimisticId] = useState<string | null | undefined>(
-    undefined,
-  );
-  useEffect(() => {
-    setOptimisticId(undefined);
-  }, [selectedId]);
-
-  const effectiveId = optimisticId !== undefined ? optimisticId : selectedId;
+  const [effectiveId, setOptimisticId] = useOptimistic(selectedId);
   const selected = members.find((member) => member.id === effectiveId) ?? null;
 
   // 바깥을 누르면 닫힘
@@ -59,8 +52,8 @@ export function MemberFilter({
 
   function choose(memberId: string | null) {
     setIsOpen(false);
-    setOptimisticId(memberId);
     startTransition(async () => {
+      setOptimisticId(memberId);
       await setMemberFilter(memberId);
       router.refresh();
     });
