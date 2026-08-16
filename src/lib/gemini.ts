@@ -24,22 +24,33 @@ export type ScannedTransaction = {
 
 const DEFAULT_MODEL = "gemini-3.1-flash-lite";
 
-const PROMPT = `이 이미지는 영수증이거나 카드/페이 앱 결제내역 캡처다. 결제 건을 추출하라.
+const PROMPT = `이미지를 보고 판별부터 하라. 영수증이나 카드/페이/은행 앱의 결제·거래내역 화면일 수도 있고, 전혀 무관한 사진일 수도 있다.
 
-규칙:
+절대 규칙 (가장 중요):
+- 이미지에 실제로 인쇄/표시된 글자에서만 추출한다. 보이지 않는 금액·상호·날짜를 추측하거나 지어내는 것은 금지다.
+- 영수증도 결제내역도 아니면 imageType 을 "other" 로 하고 transactions 는 빈 배열로 둔다.
+- 금액 숫자가 또렷하게 보이지 않는 건은 아예 넣지 않는다.
+
+추출 규칙:
 - "결제 건" 단위로 추출한다. 한 영수증에 여러 상품이 있어도 결제는 한 건이다 —
   합계 금액 한 건으로 만들고, 상품명들은 memo 에 요약한다 (예: "아메리카노 외 2건").
 - 결제내역 목록 캡처처럼 서로 다른 결제가 여러 건 보이면 각각 별도 건으로 추출한다.
 - amount 는 원 단위 정수. 합계/총액을 쓰고, 할인 반영된 실결제액을 우선한다.
-- 카드번호가 보이면 끝 4자리만 cardLast4 에 넣는다.
+- merchant: 상호명은 보통 영수증 맨 위의 큰 글씨다. 이미지에 보이면 그대로 넣는다.
+- "신한카드(1091)" "KB국민 1234" 처럼 카드 표기가 보이면 숫자 4자리를 cardLast4 에 넣는다.
 - 할부 표기("3개월" 등)가 있으면 installmentMonths 에 넣는다. 일시불이면 null.
 - 날짜/시간이 안 보이면 null. 연도가 없으면 "MM-DD" 형식으로.
-- 확실하지 않은 값은 지어내지 말고 null 로 둔다.
 - 결제 취소/환불 건은 제외한다.`;
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
   properties: {
+    imageType: {
+      type: "STRING",
+      enum: ["receipt", "payment_list", "other"],
+      description:
+        "영수증이면 receipt, 결제내역 목록 캡처면 payment_list, 둘 다 아니면 other",
+    },
     transactions: {
       type: "ARRAY",
       items: {
@@ -57,7 +68,7 @@ const RESPONSE_SCHEMA = {
       },
     },
   },
-  required: ["transactions"],
+  required: ["imageType", "transactions"],
 } as const;
 
 export async function scanReceiptImage(
@@ -126,7 +137,16 @@ export async function scanReceiptImage(
       candidates?: { content?: { parts?: { text?: string }[] } }[];
     };
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    const parsed = JSON.parse(text) as { transactions?: unknown[] };
+    const parsed = JSON.parse(text) as {
+      imageType?: string;
+      transactions?: unknown[];
+    };
+
+    // 판별 게이트: 영수증/결제내역이 아니라고 스스로 판단했으면 결과를 버린다.
+    // (무관한 사진에서 그럴듯한 거래를 지어내는 환각 방지)
+    if (parsed.imageType === "other") {
+      return { ok: true, transactions: [] };
+    }
 
     const transactions: ScannedTransaction[] = (parsed.transactions ?? [])
       .map((raw) => {
