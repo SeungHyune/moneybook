@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, Users } from "lucide-react";
+import { Check, ChevronDown, Loader2, Users } from "lucide-react";
 import { setMemberFilter } from "@/app/actions/member-filter";
 import { cn } from "@/lib/utils";
 
@@ -32,7 +32,19 @@ export function MemberFilter({
   const [isPending, startTransition] = useTransition();
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const selected = members.find((member) => member.id === selectedId) ?? null;
+  /*
+   * 낙관적 선택: 서버 반영을 기다리지 않고 헤더 표시를 먼저 바꾼다.
+   * undefined = 낙관값 없음(서버값 사용). 서버값이 갱신되면 낙관값을 비운다.
+   */
+  const [optimisticId, setOptimisticId] = useState<string | null | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    setOptimisticId(undefined);
+  }, [selectedId]);
+
+  const effectiveId = optimisticId !== undefined ? optimisticId : selectedId;
+  const selected = members.find((member) => member.id === effectiveId) ?? null;
 
   // 바깥을 누르면 닫힘
   useEffect(() => {
@@ -47,6 +59,7 @@ export function MemberFilter({
 
   function choose(memberId: string | null) {
     setIsOpen(false);
+    setOptimisticId(memberId);
     startTransition(async () => {
       await setMemberFilter(memberId);
       router.refresh();
@@ -89,13 +102,36 @@ export function MemberFilter({
             )}
           </span>
         </div>
-        <ChevronDown
-          className={cn(
-            "size-4 shrink-0 text-muted transition-transform",
-            isOpen && "rotate-180",
-          )}
-        />
+        {isPending ? (
+          <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
+        ) : (
+          <ChevronDown
+            className={cn(
+              "size-4 shrink-0 text-muted transition-transform",
+              isOpen && "rotate-180",
+            )}
+          />
+        )}
       </button>
+
+      {/*
+       * 전환 중 로딩 표시.
+       * 새 기준의 데이터가 오기 전까지 이전 화면이 그대로 남아 있으므로,
+       * 콘텐츠를 살짝 가리고 "누구 기준으로 바꾸는 중"인지 알려준다.
+       * 헤더(z-30)보다 아래(z-20)라 헤더는 계속 또렷하다.
+       */}
+      {isPending && (
+        <div className="fixed inset-0 z-20 flex justify-center">
+          <div className="flex w-full max-w-[512px] items-start justify-center bg-background/60 pt-36 backdrop-blur-[2px]">
+            <span className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-medium shadow-lg">
+              <Loader2 className="size-4 animate-spin text-primary" />
+              {selected
+                ? `${label(selected)} 기준으로 보는 중...`
+                : "전체 기준으로 보는 중..."}
+            </span>
+          </div>
+        </div>
+      )}
 
       {isOpen && (
         <div
