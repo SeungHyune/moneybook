@@ -16,9 +16,12 @@ const MIN_INTERVAL_MS = 30_000;
 
 export function AutoRefresh() {
   const router = useRouter();
-  const lastRefreshRef = useRef(Date.now());
+  // 렌더 중 Date.now() 는 순수성 규칙 위반이라 0 으로 두고 effect 에서 채운다
+  const lastRefreshRef = useRef(0);
 
   useEffect(() => {
+    lastRefreshRef.current = Date.now();
+
     function refreshIfStale() {
       if (document.visibilityState !== "visible") return;
 
