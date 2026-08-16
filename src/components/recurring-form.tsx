@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createRecurringRule } from "@/app/actions/recurring";
+import { CategoryIcon } from "@/components/category-icon";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
 import {
@@ -121,15 +122,17 @@ export function RecurringForm({
                   type="button"
                   onClick={() => setKind(option)}
                   className={cn(
-                    "flex flex-col items-center gap-1 rounded-xl border py-3 text-xs transition",
+                    "flex flex-col items-center gap-1.5 rounded-xl border py-3 text-xs transition",
                     kind === option
                       ? "border-primary bg-primary/10 font-bold text-primary"
                       : "border-border bg-surface text-muted",
                   )}
                 >
-                  <span className="text-lg" aria-hidden>
-                    {optionMeta.emoji}
-                  </span>
+                  <CategoryIcon
+                    icon={optionMeta.emoji}
+                    color={optionMeta.color}
+                    size="sm"
+                  />
                   {optionMeta.label}
                 </button>
               );

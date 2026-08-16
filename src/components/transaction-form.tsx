@@ -8,6 +8,7 @@ import {
   deleteTransaction,
   updateTransaction,
 } from "@/app/actions/transaction";
+import { CategoryIcon } from "@/components/category-icon";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
 import {
@@ -360,13 +361,18 @@ export function TransactionForm({
                     setCategoryId(categoryId === category.id ? "" : category.id)
                   }
                   className={cn(
-                    "flex items-center gap-1.5 rounded-full border px-3 py-2 text-sm transition",
+                    "flex items-center gap-1.5 rounded-full border py-1.5 pl-1.5 pr-3 text-sm transition",
                     categoryId === category.id
                       ? "border-primary bg-primary/10 font-medium text-primary"
                       : "border-border bg-surface text-muted",
                   )}
                 >
-                  <span aria-hidden>{category.icon}</span>
+                  <CategoryIcon
+                    icon={category.icon}
+                    color={category.color}
+                    size="sm"
+                    className="rounded-full"
+                  />
                   {category.name}
                 </button>
               ))}

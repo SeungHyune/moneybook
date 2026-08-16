@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CategoryIcon } from "@/components/category-icon";
 import { PAYMENT_METHOD_LABEL, installmentLabel } from "@/lib/labels";
 import { formatWon } from "@/lib/utils";
 import type {
@@ -83,13 +84,11 @@ export function TransactionRow({
 
   const content = (
     <>
-      <span
-        className="flex size-9 shrink-0 items-center justify-center rounded-full text-base"
-        style={{ backgroundColor: `${category?.color ?? "#9ca3af"}1a` }}
-        aria-hidden
-      >
-        {category?.icon ?? "📌"}
-      </span>
+      <CategoryIcon
+        icon={category?.icon ?? "📌"}
+        color={category?.color ?? "#9ca3af"}
+        size="md"
+      />
 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{title}</p>

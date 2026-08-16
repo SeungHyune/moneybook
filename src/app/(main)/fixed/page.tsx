@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
+import { CategoryIcon } from "@/components/category-icon";
 import { MonthSwitcher } from "@/components/month-switcher";
 import { FixedItemActions } from "@/components/fixed-item-actions";
 import { requireHouseholdContext } from "@/lib/auth";
@@ -114,12 +115,11 @@ export default async function FixedPage({ searchParams }: PageProps<"/fixed">) {
                   }`}
                 >
                   <div className="flex items-start gap-3">
-                    <span
-                      className="flex size-10 shrink-0 items-center justify-center rounded-full bg-surface-muted text-lg"
-                      aria-hidden
-                    >
-                      {meta.emoji}
-                    </span>
+                    <CategoryIcon
+                      icon={meta.emoji}
+                      color={meta.color}
+                      size="lg"
+                    />
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">

@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { ArrowRight, CalendarClock, Camera, CreditCard } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
+import { CategoryIcon } from "@/components/category-icon";
 import { MonthSwitcher } from "@/components/month-switcher";
 import { TransactionRow } from "@/components/transaction-row";
 import { TutorialOverlay } from "@/components/tutorial-overlay";
@@ -222,9 +223,7 @@ async function UpcomingSection({ householdId }: { householdId: string }) {
                 key={`${item.rule.id}-${item.dueDate.toISOString()}`}
                 className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
               >
-                <span className="text-xl" aria-hidden>
-                  {meta.emoji}
-                </span>
+                <CategoryIcon icon={meta.emoji} color={meta.color} size="md" />
 
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">
@@ -369,7 +368,7 @@ async function BreakdownSection({
           <li key={item.categoryId ?? "none"} className="space-y-1.5">
             <div className="flex items-center justify-between gap-2 text-sm">
               <span className="flex min-w-0 items-center gap-2">
-                <span aria-hidden>{item.icon}</span>
+                <CategoryIcon icon={item.icon} color={item.color} size="sm" />
                 <span className="truncate">{item.name}</span>
               </span>
               <span className="tabular shrink-0 font-medium">

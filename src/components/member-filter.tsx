@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useOptimistic, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, Loader2, Users } from "lucide-react";
 import { setMemberFilter } from "@/app/actions/member-filter";
@@ -108,23 +109,27 @@ export function MemberFilter({
       </button>
 
       {/*
-       * 전환 중 로딩 표시.
-       * 새 기준의 데이터가 오기 전까지 이전 화면이 그대로 남아 있으므로,
-       * 콘텐츠를 살짝 가리고 "누구 기준으로 바꾸는 중"인지 알려준다.
-       * 헤더(z-30)보다 아래(z-20)라 헤더는 계속 또렷하다.
+       * 전환 중 로딩 표시 — 헤더만 남기고 콘텐츠 전체를 덮는다.
+       *
+       * 반드시 포털로 body 에 렌더해야 한다: 부모 헤더의 backdrop-blur 가
+       * fixed 의 기준 박스를 헤더로 바꿔서, 여기서 그리면 헤더 영역만 가려진다.
+       * 헤더(z-30)보다 낮은 z-20 이라 헤더는 계속 또렷하다.
        */}
-      {isPending && (
-        <div className="fixed inset-0 z-20 flex justify-center">
-          <div className="flex w-full max-w-[512px] items-start justify-center bg-background/60 pt-36 backdrop-blur-[2px]">
-            <span className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-medium shadow-lg">
-              <Loader2 className="size-4 animate-spin text-primary" />
-              {selected
-                ? `${label(selected)} 기준으로 보는 중...`
-                : "전체 기준으로 보는 중..."}
-            </span>
-          </div>
-        </div>
-      )}
+      {isPending &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-20 flex justify-center">
+            <div className="flex w-full max-w-[512px] items-start justify-center bg-background/80 pt-40 backdrop-blur-sm">
+              <span className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-medium shadow-lg">
+                <Loader2 className="size-4 animate-spin text-primary" />
+                {selected
+                  ? `${label(selected)} 기준으로 보는 중...`
+                  : "전체 기준으로 보는 중..."}
+              </span>
+            </div>
+          </div>,
+          document.body,
+        )}
 
       {isOpen && (
         <div

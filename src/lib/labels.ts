@@ -67,25 +67,29 @@ export const OCCURRENCE_STATUS_LABEL: Record<OccurrenceStatus, string> = {
   OVERDUE: "연체",
 };
 
-/** 고정 수입/지출 종류. 아이콘은 이모지로 둬서 별도 에셋 없이 쓴다. */
+/**
+ * 고정 수입/지출 종류.
+ * emoji 는 CategoryIcon 이 벡터 아이콘으로 바꿔 그리는 키다.
+ * color 는 아이콘 타일 색.
+ */
 export const RECURRING_KIND_META: Record<
   RecurringKind,
-  { label: string; emoji: string; type: "INCOME" | "EXPENSE" }
+  { label: string; emoji: string; color: string; type: "INCOME" | "EXPENSE" }
 > = {
-  SALARY: { label: "월급", emoji: "💰", type: "INCOME" },
-  SIDE_INCOME: { label: "부수입", emoji: "🪙", type: "INCOME" },
-  CARD_BILL: { label: "카드대금", emoji: "💳", type: "EXPENSE" },
-  MAINTENANCE_FEE: { label: "관리비", emoji: "🏢", type: "EXPENSE" },
-  TELECOM: { label: "통신비", emoji: "📱", type: "EXPENSE" },
-  UTILITY: { label: "공과금", emoji: "💡", type: "EXPENSE" },
-  RENT: { label: "월세/주거비", emoji: "🏠", type: "EXPENSE" },
-  LOAN_REPAYMENT: { label: "대출상환", emoji: "🏦", type: "EXPENSE" },
-  INSURANCE: { label: "보험료", emoji: "🛡️", type: "EXPENSE" },
-  SUBSCRIPTION: { label: "구독료", emoji: "🎬", type: "EXPENSE" },
-  SAVINGS: { label: "저축/적금", emoji: "🐷", type: "EXPENSE" },
-  EDUCATION: { label: "교육비", emoji: "📚", type: "EXPENSE" },
-  MEMBERSHIP: { label: "회비", emoji: "🤝", type: "EXPENSE" },
-  OTHER: { label: "기타", emoji: "📌", type: "EXPENSE" },
+  SALARY: { label: "월급", emoji: "💰", color: "#2563eb", type: "INCOME" },
+  SIDE_INCOME: { label: "부수입", emoji: "🪙", color: "#0891b2", type: "INCOME" },
+  CARD_BILL: { label: "카드대금", emoji: "💳", color: "#7c3aed", type: "EXPENSE" },
+  MAINTENANCE_FEE: { label: "관리비", emoji: "🏢", color: "#8b5cf6", type: "EXPENSE" },
+  TELECOM: { label: "통신비", emoji: "📱", color: "#06b6d4", type: "EXPENSE" },
+  UTILITY: { label: "공과금", emoji: "💡", color: "#f59e0b", type: "EXPENSE" },
+  RENT: { label: "월세/주거비", emoji: "🏠", color: "#f97316", type: "EXPENSE" },
+  LOAN_REPAYMENT: { label: "대출상환", emoji: "🏦", color: "#78716c", type: "EXPENSE" },
+  INSURANCE: { label: "보험료", emoji: "🛡️", color: "#64748b", type: "EXPENSE" },
+  SUBSCRIPTION: { label: "구독료", emoji: "🎬", color: "#a855f7", type: "EXPENSE" },
+  SAVINGS: { label: "저축/적금", emoji: "🐷", color: "#22c55e", type: "EXPENSE" },
+  EDUCATION: { label: "교육비", emoji: "📚", color: "#6366f1", type: "EXPENSE" },
+  MEMBERSHIP: { label: "회비", emoji: "🤝", color: "#ec4899", type: "EXPENSE" },
+  OTHER: { label: "기타", emoji: "📌", color: "#9ca3af", type: "EXPENSE" },
 };
 
 /** 할부 개월 선택지 */
