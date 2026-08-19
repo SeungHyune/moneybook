@@ -41,6 +41,7 @@ export async function GET(request: Request) {
     const schedule = await getFixedSchedule(household.id, yearMonth);
 
     for (const item of schedule) {
+      // 완료/건너뜀 처리된 건은 더 알리지 않는다
       if (item.status === "PAID" || item.status === "SKIPPED") continue;
 
       const due = new Date(
@@ -54,18 +55,49 @@ export async function GET(request: Request) {
         (due.getTime() - todayKst.getTime()) / 86_400_000,
       );
 
-      const notifyBefore = item.rule.notifyDaysBefore;
-      if (daysLeft !== 0 && daysLeft !== notifyBefore) continue;
-      if (daysLeft < 0) continue;
+      const isIncome = item.rule.type === "INCOME";
+      const amountText = `${formatWonShort(item.amount)}원${
+        item.rule.isAmountVariable ? " (예상)" : ""
+      }`;
 
-      const when = daysLeft === 0 ? "오늘" : `${daysLeft}일 뒤`;
-      const verb = item.rule.type === "INCOME" ? "들어와요" : "나가요";
+      /*
+       * 알림 단계 (가구 구성원 전원에게):
+       *   전날(D-1)  : "내일 나갈/들어올 예정이에요"
+       *   당일(D-0)  : "나갔는지/들어왔는지 확인하고 완료 처리해 주세요"
+       *   다음날(D+1): 아직 완료 처리가 안 됐으면 한 번 더 — 확인해야
+       *                다음 회차 관리가 이어진다
+       *   그보다 일찍(notifyDaysBefore > 1): 예고 한 번 더
+       * 같은 tag 라 최신 알림이 이전 것을 대체한다.
+       */
+      let title: string | null = null;
+      let body: string | null = null;
+
+      if (daysLeft === 1) {
+        title = `내일 ${item.rule.name} 예정`;
+        body = `${amountText}이 ${isIncome ? "들어올" : "나갈"} 예정이에요`;
+      } else if (daysLeft === 0) {
+        title = `오늘 ${item.rule.name} ${isIncome ? "들어오는" : "나가는"} 날`;
+        body = `${amountText} — ${
+          isIncome ? "들어왔는지" : "나갔는지"
+        } 확인하고 완료 처리해 주세요`;
+      } else if (daysLeft === -1) {
+        title = `${item.rule.name} 확인이 필요해요`;
+        body = `어제가 예정일이었어요. ${
+          isIncome ? "들어왔다면" : "나갔다면"
+        } 완료 처리해 주세요 (${amountText})`;
+      } else if (
+        item.rule.notifyDaysBefore > 1 &&
+        daysLeft === item.rule.notifyDaysBefore
+      ) {
+        title = `${daysLeft}일 뒤 ${item.rule.name}`;
+        body = `${amountText}이 ${isIncome ? "들어올" : "나갈"} 예정이에요`;
+      }
+
+      if (!title || !body) continue;
 
       const { sent } = await sendPushToHousehold(household.id, {
-        title: `${when} ${item.rule.name}`,
-        body: `${formatWonShort(item.amount)}원이 ${verb}${
-          item.rule.isAmountVariable ? " (예상 금액)" : ""
-        }`,
+        title,
+        body,
         url: "/fixed",
         tag: `fixed-${item.rule.id}`,
       });

@@ -6,7 +6,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth";
 import { getOccurrenceDate } from "@/lib/billing";
-import { toYearMonth } from "@/lib/utils";
+import { sendPushToHousehold } from "@/lib/push";
+import { formatWonShort, toYearMonth } from "@/lib/utils";
 import type { ActionState } from "./household";
 
 const recurringSchema = z.object({
@@ -233,6 +234,24 @@ export async function markOccurrencePaid(
       });
     }
   });
+
+  // 완료 처리를 다른 구성원에게도 알린다 — 서로 확인돼야 다음 회차 관리가 이어진다
+  try {
+    await sendPushToHousehold(
+      rule.householdId,
+      {
+        title: `${member.displayName ?? "구성원"}님이 ${rule.name} 완료 처리`,
+        body: `${formatWonShort(actualAmount)}원 ${
+          rule.type === "INCOME" ? "입금" : "납부"
+        } 확인됐어요`,
+        url: "/fixed",
+        tag: `fixed-${rule.id}`,
+      },
+      member.userId,
+    );
+  } catch (error) {
+    console.error("[push] 완료 처리 알림 실패", error);
+  }
 
   revalidatePath("/", "layout");
   return { success: "처리했어요." };

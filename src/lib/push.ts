@@ -81,13 +81,20 @@ export async function sendPushToUser(userId: string, payload: PushPayload) {
   return { sent, failed };
 }
 
-/** 가구 구성원 전원에게 (구독한 기기가 있는 사람만 받는다) */
+/**
+ * 가구 구성원 전원에게 (구독한 기기가 있는 사람만 받는다).
+ * exceptUserId 를 주면 그 사람은 제외한다 — "내가 등록한 걸 나한테 알리지 않기".
+ */
 export async function sendPushToHousehold(
   householdId: string,
   payload: PushPayload,
+  exceptUserId?: string,
 ) {
   const members = await prisma.householdMember.findMany({
-    where: { householdId },
+    where: {
+      householdId,
+      ...(exceptUserId ? { userId: { not: exceptUserId } } : {}),
+    },
     select: { userId: true },
   });
 

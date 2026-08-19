@@ -10,7 +10,49 @@ import {
   insertTransactionWithEffects,
   resolveCardEffect,
 } from "@/lib/record-transaction";
+import { sendPushToHousehold } from "@/lib/push";
+import { formatWonShort } from "@/lib/utils";
 import type { ActionState } from "./household";
+
+/**
+ * 내역이 등록되면 등록한 본인을 뺀 나머지 구성원에게 알린다.
+ * 알림 실패가 등록 자체를 막으면 안 되므로 조용히 삼킨다.
+ */
+async function notifyOthersOfNewTransaction({
+  householdId,
+  authorUserId,
+  authorName,
+  type,
+  amount,
+  merchant,
+  transactionId,
+}: {
+  householdId: string;
+  authorUserId: string;
+  authorName: string;
+  type: "INCOME" | "EXPENSE" | "TRANSFER";
+  amount: number;
+  merchant: string | null;
+  transactionId: string;
+}) {
+  try {
+    const typeLabel =
+      type === "INCOME" ? "수입" : type === "TRANSFER" ? "이체" : "지출";
+
+    await sendPushToHousehold(
+      householdId,
+      {
+        title: `${authorName}님이 ${typeLabel}을 등록했어요`,
+        body: `${merchant ? `${merchant} · ` : ""}${formatWonShort(amount)}원`,
+        url: "/transactions",
+        tag: `tx-${transactionId}`,
+      },
+      authorUserId,
+    );
+  } catch (error) {
+    console.error("[push] 내역 등록 알림 실패", error);
+  }
+}
 
 const transactionSchema = z
   .object({
@@ -126,7 +168,7 @@ export async function createTransaction(
   // 자동 수집함에서 넘어온 경우, 등록되면 그 항목을 처리 완료로 표시한다
   const inboxId = nullify(raw.inboxId);
 
-  await prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     const created = await insertTransactionWithEffects(tx, {
       householdId: data.householdId,
       type: data.type,
@@ -155,6 +197,19 @@ export async function createTransaction(
         data: { status: "CONFIRMED", transactionId: created.id },
       });
     }
+
+    return created;
+  });
+
+  // 커밋된 뒤에 알린다 (redirect 는 throw 라서 그 전에)
+  await notifyOthersOfNewTransaction({
+    householdId: data.householdId,
+    authorUserId: member.userId,
+    authorName: member.displayName ?? "구성원",
+    type: data.type,
+    amount: data.amount,
+    merchant: nullify(data.merchant),
+    transactionId: created.id,
   });
 
   revalidatePath("/", "layout");
