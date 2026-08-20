@@ -138,7 +138,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
 /** 자동 수집함에 확인할 게 있으면 알려준다 */
 async function InboxBanner({ userId }: { userId: string }) {
   const count = await prisma.ingestInbox.count({
-    where: { userId, status: "PENDING" },
+    where: { userId, status: { in: ["PENDING", "FAILED"] } },
   });
 
   if (count === 0) return null;

@@ -158,9 +158,11 @@ model PushSubscription {
 }
 
 enum IngestStatus {
-  PENDING //  확인 대기
+  QUEUED //  업로드됨, AI 분석 대기/진행 중
+  PENDING //  분석 완료, 확인 대기
   CONFIRMED //  거래로 등록됨
   DISCARDED //  버림
+  FAILED //  분석 실패 (원문에 사유)
 }
 
 /// 자동 수집 수신함.

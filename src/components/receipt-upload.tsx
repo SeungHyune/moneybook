@@ -57,7 +57,8 @@ export function ReceiptUpload() {
   const [message, setMessage] = useState<string | null>(null);
   const [isError, setIsError] = useState(false);
 
-  async function scanOne(file: File) {
+  /** 업로드만 하고 바로 돌아온다 — 분석은 서버 백그라운드 큐에서 */
+  async function uploadOne(file: File) {
     const compressed = await compressImage(file);
 
     const formData = new FormData();
@@ -68,15 +69,12 @@ export function ReceiptUpload() {
       body: formData,
     });
     const data = (await response.json()) as {
-      added?: number;
-      duplicates?: number;
+      status?: "queued" | "duplicate";
       error?: string;
     };
 
-    if (!response.ok) {
-      throw new Error(data.error ?? "인식에 실패했어요.");
-    }
-    return { added: data.added ?? 0, duplicates: data.duplicates ?? 0 };
+    if (!response.ok) throw new Error(data.error ?? "업로드에 실패했어요.");
+    return data.status ?? "queued";
   }
 
   async function handleFiles(fileList: FileList) {
@@ -86,42 +84,36 @@ export function ReceiptUpload() {
     setIsScanning(true);
     setMessage(null);
     setIsError(false);
+    setProgress(files.length > 1 ? `${files.length}장 업로드 중...` : "업로드 중...");
 
-    let added = 0;
-    let duplicates = 0;
-    const errors: string[] = [];
+    // 큐 방식이라 병렬로 올려도 안전하다 — 서버가 각각 즉시 접수한다
+    const results = await Promise.allSettled(files.map((file) => uploadOne(file)));
 
-    for (const [index, file] of files.entries()) {
-      if (files.length > 1) {
-        setProgress(`${index + 1}/${files.length}장 읽는 중...`);
-      }
-
-      try {
-        const result = await scanOne(file);
-        added += result.added;
-        duplicates += result.duplicates;
-      } catch (error) {
-        errors.push(error instanceof Error ? error.message : "실패");
-      }
-    }
+    const queuedCount = results.filter(
+      (r) => r.status === "fulfilled" && r.value === "queued",
+    ).length;
+    const duplicates = results.filter(
+      (r) => r.status === "fulfilled" && r.value === "duplicate",
+    ).length;
+    const failed = results.filter((r) => r.status === "rejected");
 
     setProgress(null);
     setIsScanning(false);
 
     const parts: string[] = [];
-    if (added) parts.push(`${added}건을 읽었어요`);
-    if (duplicates) parts.push(`${duplicates}건은 이미 있어요`);
-    if (errors.length) parts.push(`${errors.length}장 실패 (${errors[0]})`);
+    if (queuedCount) parts.push(`${queuedCount}장 업로드 완료 — 분석이 끝나면 아래에 나타나요`);
+    if (duplicates) parts.push(`${duplicates}장은 이미 올린 이미지예요`);
+    if (failed.length) {
+      const reason = failed[0].status === "rejected" && failed[0].reason instanceof Error
+        ? failed[0].reason.message : "실패";
+      parts.push(`${failed.length}장 업로드 실패 (${reason})`);
+    }
 
-    if (added === 0 && errors.length > 0) {
+    if (queuedCount === 0 && failed.length > 0) {
       setIsError(true);
-      setMessage(errors[0]);
+      setMessage(parts.join(", "));
     } else {
-      setMessage(
-        parts.length > 0
-          ? `${parts.join(", ")}.${added ? " 아래에서 확인 후 등록해 주세요." : ""}`
-          : "새로 읽은 내역이 없어요.",
-      );
+      setMessage(parts.length ? parts.join(", ") : "올릴 이미지가 없어요.");
     }
 
     router.refresh();

@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ChevronLeft, Inbox } from "lucide-react";
 import { DiscardInboxButton, PasteIngestForm } from "@/components/inbox-actions";
+import { InboxPoller } from "@/components/inbox-poller";
 import { ReceiptUpload } from "@/components/receipt-upload";
+import { Loader2 } from "lucide-react";
 import { requireHouseholdContext } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { formatRelativeDate, formatWon } from "@/lib/utils";
@@ -16,9 +18,10 @@ export const metadata = { title: "자동 수집함" };
 export default async function InboxPage() {
   const { user } = await requireHouseholdContext();
 
-  const [pending, recentConfirmed] = await Promise.all([
+  const [items, recentConfirmed] = await Promise.all([
     prisma.ingestInbox.findMany({
-      where: { userId: user.id, status: "PENDING" },
+      // 분석 중·확인 대기·실패를 함께 보여준다
+      where: { userId: user.id, status: { in: ["QUEUED", "PENDING", "FAILED"] } },
       orderBy: { createdAt: "desc" },
       take: 50,
     }),
@@ -28,6 +31,10 @@ export default async function InboxPage() {
       take: 5,
     }),
   ]);
+
+  const queued = items.filter((item) => item.status === "QUEUED");
+  const failed = items.filter((item) => item.status === "FAILED");
+  const pending = items.filter((item) => item.status === "PENDING");
 
   return (
     <>
@@ -48,10 +55,55 @@ export default async function InboxPage() {
       </header>
 
       <div className="space-y-4 px-4 py-4">
+        {/* 분석 중인 항목이 있으면 몇 초마다 자동 갱신 */}
+        <InboxPoller active={queued.length > 0} />
+
         <ReceiptUpload />
         <PasteIngestForm />
 
-        {pending.length === 0 ? (
+        {/* 백그라운드 분석 진행 중 */}
+        {queued.length > 0 && (
+          <ul className="space-y-2">
+            {queued.map((item) => (
+              <li
+                key={item.id}
+                className="flex items-center gap-3 rounded-2xl border border-dashed border-border bg-surface p-4"
+              >
+                <Loader2 className="size-5 shrink-0 animate-spin text-primary" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">이미지를 읽고 있어요...</p>
+                  <p className="text-xs text-muted">
+                    끝나면 여기에 결과가 나타나요
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* 분석 실패 */}
+        {failed.length > 0 && (
+          <ul className="space-y-2">
+            {failed.map((item) => (
+              <li
+                key={item.id}
+                className="flex items-center gap-3 rounded-2xl border border-expense/30 bg-expense/5 p-4"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-expense">
+                    {item.rawText.replace(/^📷\s*(실패:)?\s*/, "")}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted">
+                    더 밝고 또렷하게 다시 올려 보세요
+                  </p>
+                </div>
+                <DiscardInboxButton inboxId={item.id} />
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {pending.length === 0 && queued.length === 0 && failed.length === 0 ? (
           <div className="rounded-2xl border border-border bg-surface px-6 py-10 text-center">
             <Inbox className="mx-auto size-8 text-muted" />
             <p className="mt-3 text-sm font-medium">확인할 항목이 없어요</p>

@@ -9,7 +9,7 @@ export async function discardInboxItem(inboxId: string) {
   const user = await requireUser();
 
   await prisma.ingestInbox.updateMany({
-    where: { id: inboxId, userId: user.id, status: "PENDING" },
+    where: { id: inboxId, userId: user.id, status: { in: ["PENDING", "FAILED"] } },
     data: { status: "DISCARDED" },
   });
 
