@@ -448,8 +448,23 @@ export async function getTransactions(
     },
     include: {
       category: { select: { name: true, icon: true, color: true } },
-      card: { select: { name: true, issuer: true, color: true, last4: true } },
-      account: { select: { name: true, bankName: true } },
+      card: {
+        select: {
+          name: true,
+          issuer: true,
+          color: true,
+          last4: true,
+          // 구성원이 여럿이면 "누구 카드인지"가 이름만큼 중요하다
+          ownerMember: { select: { displayName: true } },
+        },
+      },
+      account: {
+        select: {
+          name: true,
+          bankName: true,
+          ownerMember: { select: { displayName: true } },
+        },
+      },
       payer: { select: { displayName: true, color: true } },
     },
     orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
@@ -479,6 +494,7 @@ export async function getFormOptions(householdId: string) {
         billingDay: true,
         // 체크카드는 결제 즉시 이 계좌에서 빠진다
         paymentAccountId: true,
+        ownerMember: { select: { displayName: true } },
       },
     }),
     prisma.account.findMany({
@@ -495,6 +511,7 @@ export async function getFormOptions(householdId: string) {
         // 수정 권한 판단에 필요 (canManageAsset)
         ownerMemberId: true,
         createdByMemberId: true,
+        ownerMember: { select: { displayName: true } },
       },
     }),
     prisma.householdMember.findMany({

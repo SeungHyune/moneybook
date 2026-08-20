@@ -152,6 +152,11 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
 
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-bold">
+                        {card.ownerMember?.displayName && (
+                          <span className="text-muted">
+                            {card.ownerMember.displayName} ·{" "}
+                          </span>
+                        )}
                         {card.issuer ? `${card.issuer} ` : ""}
                         {card.name}
                       </p>
@@ -165,8 +170,6 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                         {!isCredit && card.paymentAccount
                           ? ` · ${card.paymentAccount.name} 즉시출금`
                           : null}
-                        {card.ownerMember?.displayName &&
-                          ` · ${card.ownerMember.displayName}`}
                       </p>
                     </div>
 
@@ -295,6 +298,11 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">
+                      {account.ownerMember?.displayName && (
+                        <span className="text-muted">
+                          {account.ownerMember.displayName} ·{" "}
+                        </span>
+                      )}
                       {account.bankName ? `${account.bankName} ` : ""}
                       {account.name}
                     </p>

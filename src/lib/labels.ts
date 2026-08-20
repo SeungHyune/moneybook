@@ -92,6 +92,17 @@ export const RECURRING_KIND_META: Record<
   OTHER: { label: "기타", emoji: "📌", color: "#9ca3af", type: "EXPENSE" },
 };
 
+/**
+ * 카드/계좌 이름 앞에 붙는 소유자 접두어.
+ * 부부가 같은 은행 계좌를 하나씩 갖고 있으면 이름만으로 구분이 안 된다.
+ * 소유자가 지정된 것만 "아라 · " 처럼 붙이고, 공용은 그대로 둔다.
+ */
+export function ownerPrefix(
+  ownerMember: { displayName: string | null } | null | undefined,
+) {
+  return ownerMember?.displayName ? `${ownerMember.displayName} · ` : "";
+}
+
 /** 할부 개월 선택지 */
 export const INSTALLMENT_OPTIONS = [1, 2, 3, 4, 5, 6, 9, 10, 12, 18, 24, 36];
 

@@ -312,7 +312,14 @@ async function CardBillingSection({
                 aria-hidden
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{card.name}</p>
+                <p className="truncate text-sm font-medium">
+                  {card.ownerMember?.displayName && (
+                    <span className="text-muted">
+                      {card.ownerMember.displayName} ·{" "}
+                    </span>
+                  )}
+                  {card.name}
+                </p>
                 <p className="text-xs text-muted">
                   {period.billingDate.getMonth() + 1}월{" "}
                   {period.billingDate.getDate()}일 결제

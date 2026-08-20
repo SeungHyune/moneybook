@@ -15,6 +15,7 @@ import {
   CARD_TYPE_LABEL,
   INSTALLMENT_OPTIONS,
   PAYMENT_METHOD_LABEL,
+  ownerPrefix,
 } from "@/lib/labels";
 import { cn, formatWon } from "@/lib/utils";
 import type {
@@ -39,6 +40,7 @@ type Options = {
     color: string;
     billingDay: number | null;
     paymentAccountId: string | null;
+    ownerMember?: { displayName: string | null } | null;
   }[];
   accounts: {
     id: string;
@@ -47,6 +49,7 @@ type Options = {
     type: string;
     balance: number;
     color: string;
+    ownerMember?: { displayName: string | null } | null;
   }[];
   members: {
     id: string;
@@ -425,6 +428,7 @@ export function TransactionForm({
                   <option value="">카드를 선택하세요</option>
                   {options.cards.map((card) => (
                     <option key={card.id} value={card.id}>
+                      {ownerPrefix(card.ownerMember)}
                       {card.issuer ? `${card.issuer} ` : ""}
                       {card.name}
                       {card.last4 ? ` (${card.last4})` : ""} ·{" "}
@@ -449,7 +453,7 @@ export function TransactionForm({
                 )}
               >
                 {linkedAccount
-                  ? `결제하면 ${linkedAccount.bankName ? `${linkedAccount.bankName} ` : ""}${linkedAccount.name} 계좌에서 바로 빠져나갑니다. (현재 잔액 ${formatWon(linkedAccount.balance)})`
+                  ? `결제하면 ${ownerPrefix(linkedAccount.ownerMember)}${linkedAccount.bankName ? `${linkedAccount.bankName} ` : ""}${linkedAccount.name} 계좌에서 바로 빠져나갑니다. (현재 잔액 ${formatWon(linkedAccount.balance)})`
                   : "연결 계좌가 없어서 계좌 잔액에는 반영되지 않아요. 카드/자산 화면에서 이 카드에 출금 계좌를 연결해 주세요."}
               </p>
             )}
@@ -542,6 +546,7 @@ export function TransactionForm({
               <option value="">선택 안 함</option>
               {options.accounts.map((account) => (
                 <option key={account.id} value={account.id}>
+                  {ownerPrefix(account.ownerMember)}
                   {account.bankName ? `${account.bankName} ` : ""}
                   {account.name} ({formatWon(account.balance)})
                 </option>
@@ -560,6 +565,7 @@ export function TransactionForm({
               <option value="">선택하세요</option>
               {options.accounts.map((account) => (
                 <option key={account.id} value={account.id}>
+                  {ownerPrefix(account.ownerMember)}
                   {account.bankName ? `${account.bankName} ` : ""}
                   {account.name}
                 </option>

@@ -12,7 +12,12 @@ import {
 import { Field, Input, Select } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { getStatementPeriod } from "@/lib/billing";
-import { ACCOUNT_TYPE_LABEL, BANKS, CARD_ISSUERS } from "@/lib/labels";
+import {
+  ACCOUNT_TYPE_LABEL,
+  BANKS,
+  CARD_ISSUERS,
+  ownerPrefix,
+} from "@/lib/labels";
 import { cn, toYearMonth } from "@/lib/utils";
 import type { AccountType, CardType, MemberRole } from "@/generated/prisma/enums";
 
@@ -90,7 +95,12 @@ export function AssetForm({
 }: {
   householdId: string;
   members: AssetMember[];
-  accounts: { id: string; name: string; bankName: string | null }[];
+  accounts: {
+    id: string;
+    name: string;
+    bankName: string | null;
+    ownerMember?: { displayName: string | null } | null;
+  }[];
   currentMember: CurrentMember;
   defaultTab?: "card" | "account";
 }) {
@@ -208,7 +218,12 @@ function CardForm({
 }: {
   householdId?: string;
   members: AssetMember[];
-  accounts: { id: string; name: string; bankName: string | null }[];
+  accounts: {
+    id: string;
+    name: string;
+    bankName: string | null;
+    ownerMember?: { displayName: string | null } | null;
+  }[];
   currentMember: CurrentMember;
   card?: EditableCard;
 }) {
@@ -358,6 +373,7 @@ function CardForm({
               <option value="">선택 안 함</option>
               {accounts.map((account) => (
                 <option key={account.id} value={account.id}>
+                  {ownerPrefix(account.ownerMember)}
                   {account.bankName ? `${account.bankName} ` : ""}
                   {account.name}
                 </option>
@@ -392,6 +408,7 @@ function CardForm({
               <option value="">선택 안 함</option>
               {accounts.map((account) => (
                 <option key={account.id} value={account.id}>
+                  {ownerPrefix(account.ownerMember)}
                   {account.bankName ? `${account.bankName} ` : ""}
                   {account.name}
                 </option>

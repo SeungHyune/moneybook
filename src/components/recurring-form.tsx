@@ -11,6 +11,7 @@ import {
   FREQUENCY_LABEL,
   PAYMENT_METHOD_LABEL,
   RECURRING_KIND_META,
+  ownerPrefix,
 } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import type {
@@ -19,10 +20,23 @@ import type {
   RecurringKind,
 } from "@/generated/prisma/enums";
 
+type Owner = { displayName: string | null } | null;
+
 type Options = {
   categories: { id: string; name: string; type: string; icon: string | null }[];
-  cards: { id: string; name: string; issuer: string | null; last4: string | null }[];
-  accounts: { id: string; name: string; bankName: string | null }[];
+  cards: {
+    id: string;
+    name: string;
+    issuer: string | null;
+    last4: string | null;
+    ownerMember?: Owner;
+  }[];
+  accounts: {
+    id: string;
+    name: string;
+    bankName: string | null;
+    ownerMember?: Owner;
+  }[];
 };
 
 const KIND_ORDER: RecurringKind[] = [
@@ -270,6 +284,7 @@ export function RecurringForm({
               <option value="">선택 안 함</option>
               {options.cards.map((card) => (
                 <option key={card.id} value={card.id}>
+                  {ownerPrefix(card.ownerMember)}
                   {card.issuer ? `${card.issuer} ` : ""}
                   {card.name}
                   {card.last4 ? ` (${card.last4})` : ""}
@@ -283,6 +298,7 @@ export function RecurringForm({
               <option value="">선택 안 함</option>
               {options.accounts.map((account) => (
                 <option key={account.id} value={account.id}>
+                  {ownerPrefix(account.ownerMember)}
                   {account.bankName ? `${account.bankName} ` : ""}
                   {account.name}
                 </option>

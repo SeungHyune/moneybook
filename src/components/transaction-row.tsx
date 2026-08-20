@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { CategoryIcon } from "@/components/category-icon";
-import { PAYMENT_METHOD_LABEL, installmentLabel } from "@/lib/labels";
+import {
+  PAYMENT_METHOD_LABEL,
+  installmentLabel,
+  ownerPrefix,
+} from "@/lib/labels";
 import { formatWon } from "@/lib/utils";
 import type {
   PaymentMethod,
@@ -23,8 +27,13 @@ export type TransactionRowData = {
     issuer: string | null;
     color: string;
     last4: string | null;
+    ownerMember?: { displayName: string | null } | null;
   } | null;
-  account: { name: string; bankName: string | null } | null;
+  account: {
+    name: string;
+    bankName: string | null;
+    ownerMember?: { displayName: string | null } | null;
+  } | null;
   payer: { displayName: string | null; color: string } | null;
 };
 
@@ -62,12 +71,14 @@ export function TransactionRow({
   const methodParts: string[] = [];
 
   if (card) {
-    methodParts.push(card.last4 ? `${card.name} (${card.last4})` : card.name);
+    methodParts.push(
+      `${ownerPrefix(card.ownerMember)}${card.last4 ? `${card.name} (${card.last4})` : card.name}`,
+    );
     if (installmentMonths > 1) {
       methodParts.push(installmentLabel(installmentMonths));
     }
   } else if (account) {
-    methodParts.push(account.name);
+    methodParts.push(`${ownerPrefix(account.ownerMember)}${account.name}`);
     methodParts.push(PAYMENT_METHOD_LABEL[paymentMethod]);
   } else {
     methodParts.push(PAYMENT_METHOD_LABEL[paymentMethod]);
