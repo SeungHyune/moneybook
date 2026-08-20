@@ -19,6 +19,8 @@ const PUBLIC_PATHS = [
   "/sw.js",
   // 세션이 아니라 자체 시크릿으로 인증하는 API (Vercel Cron)
   "/api/cron",
+  // (임시) 모듈 로드 프로브 — 원인 확정 후 삭제
+  "/api/probe",
 ];
 
 function isPublicPath(pathname: string) {
