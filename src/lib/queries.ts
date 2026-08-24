@@ -421,6 +421,7 @@ export async function getTransactions(
     skip = 0,
     type,
     cardId,
+    accountId,
     categoryId,
     payerMemberId,
   }: {
@@ -430,6 +431,8 @@ export async function getTransactions(
     skip?: number;
     type?: "INCOME" | "EXPENSE" | "TRANSFER";
     cardId?: string;
+    /** 이 계좌가 관련된 내역 (출금·입금·이체 수신 포함) */
+    accountId?: string;
     categoryId?: string;
     /** 구성원 보기: 이 사람이 결제한 것만 */
     payerMemberId?: string | null;
@@ -443,6 +446,9 @@ export async function getTransactions(
       ...(range ? { occurredAt: { gte: range.start, lte: range.end } } : {}),
       ...(type ? { type } : {}),
       ...(cardId ? { cardId } : {}),
+      ...(accountId
+        ? { OR: [{ accountId }, { toAccountId: accountId }] }
+        : {}),
       ...(categoryId ? { categoryId } : {}),
       ...(payerMemberId ? { payerMemberId } : {}),
     },

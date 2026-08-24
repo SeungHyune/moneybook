@@ -150,7 +150,11 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                       aria-hidden
                     />
 
-                    <div className="min-w-0 flex-1">
+                    {/* 누르면 이 카드의 내역만 보는 상세로 */}
+                    <Link
+                      href={`/cards/${card.id}`}
+                      className="min-w-0 flex-1 active:opacity-70"
+                    >
                       <p className="truncate text-sm font-bold">
                         {card.ownerMember?.displayName && (
                           <span className="text-muted">
@@ -171,7 +175,7 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                           ? ` · ${card.paymentAccount.name} 즉시출금`
                           : null}
                       </p>
-                    </div>
+                    </Link>
 
                     <div className="flex shrink-0 items-center gap-1">
                       <div className="text-right">
@@ -296,7 +300,11 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                     style={{ backgroundColor: account.color }}
                     aria-hidden
                   />
-                  <div className="min-w-0 flex-1">
+                  {/* 누르면 이 계좌의 입출금 내역 상세로 */}
+                  <Link
+                    href={`/accounts/${account.id}`}
+                    className="min-w-0 flex-1 active:opacity-70"
+                  >
                     <p className="truncate text-sm font-medium">
                       {account.ownerMember?.displayName && (
                         <span className="text-muted">
@@ -309,7 +317,7 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                     <p className="text-xs text-muted">
                       {ACCOUNT_TYPE_LABEL[account.type as keyof typeof ACCOUNT_TYPE_LABEL]}
                     </p>
-                  </div>
+                  </Link>
                   <span
                     className={`tabular shrink-0 text-sm font-bold ${
                       account.balance < 0 ? "text-expense" : ""
