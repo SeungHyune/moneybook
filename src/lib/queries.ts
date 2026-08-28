@@ -724,6 +724,50 @@ export async function getTotalAssets(
   return result._sum.balance ?? 0;
 }
 
+/**
+ * 자산을 종류별로 나눈 요약.
+ *
+ * "총 자산" 한 줄만 보면 현금인지 통장인지 알 수 없다.
+ * 현금(지갑)·입출금·예적금·투자를 나누고, 대출은 갚을 돈으로 따로 센다.
+ */
+export async function getAssetSummary(
+  householdId: string,
+  memberId?: string | null,
+) {
+  const grouped = await prisma.account.groupBy({
+    by: ["type"],
+    where: {
+      householdId,
+      isActive: true,
+      ...(memberId ? { ownerMemberId: memberId } : {}),
+    },
+    _sum: { balance: true },
+  });
+
+  const amountOf = (type: string) =>
+    grouped.find((row) => row.type === type)?._sum.balance ?? 0;
+
+  const cash = amountOf("CASH");
+  const checking = amountOf("CHECKING");
+  const savings = amountOf("SAVINGS");
+  const investment = amountOf("INVESTMENT");
+  const other = amountOf("OTHER");
+  // 대출은 음수로 저장돼 있다 — 갚을 돈으로 볼 땐 양수로 뒤집는다
+  const loan = amountOf("LOAN");
+
+  return {
+    cash,
+    checking,
+    savings,
+    investment,
+    other,
+    /** 갚아야 할 대출 (양수) */
+    loanDebt: Math.abs(Math.min(0, loan)),
+    /** 현금 + 통장 + 예적금 + 투자 + 기타 (대출 제외) */
+    total: cash + checking + savings + investment + other,
+  };
+}
+
 /** 헤더 구성원 선택기에 쓰는 가벼운 구성원 목록 */
 export async function getHouseholdMembers(householdId: string) {
   const members = await prisma.householdMember.findMany({

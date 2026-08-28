@@ -7,10 +7,10 @@ import { MonthSwitcher } from "@/components/month-switcher";
 import { getMemberFilter } from "@/lib/member-filter";
 import { canManageAsset, requireHouseholdContext } from "@/lib/auth";
 import {
+  getAssetSummary,
   getCardBillings,
   getFormOptions,
   getHouseholdMembers,
-  getTotalAssets,
   getUpcomingCardPayments,
 } from "@/lib/queries";
 import { ACCOUNT_TYPE_LABEL, CARD_TYPE_LABEL } from "@/lib/labels";
@@ -37,12 +37,12 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
   ]);
   const memberId = filterMember?.id ?? null;
 
-  const [billings, upcomingPayments, options, totalAssets] = await Promise.all([
+  const [billings, upcomingPayments, options, assets] = await Promise.all([
     getCardBillings(household.id, yearMonth, memberId),
     // 신용카드는 "고른 달"이 아니라 "다음 결제일" 기준으로 보여준다
     getUpcomingCardPayments(household.id, memberId),
     getFormOptions(household.id),
-    getTotalAssets(household.id, memberId),
+    getAssetSummary(household.id, memberId),
   ]);
 
   // 구성원 보기일 땐 그 사람 소유 계좌만
@@ -52,6 +52,11 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
 
   const upcomingByCard = new Map(
     upcomingPayments.map((item) => [item.card.id, item]),
+  );
+
+  // 체크카드는 카드에 잔액이 있는 게 아니라 연결 통장에 있다 — 그걸 같이 보여준다
+  const balanceByAccount = new Map(
+    options.accounts.map((account) => [account.id, account.balance]),
   );
 
   const totalUpcoming = upcomingPayments
@@ -91,18 +96,57 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
           </p>
         )}
 
-        <section className="rounded-2xl border border-border bg-surface p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted">총 자산</span>
-            <span className="tabular text-lg font-bold">
-              {formatWon(totalAssets)}
-            </span>
+        {/* 가진 돈 / 갚을 돈을 나눠서 본다 */}
+        <section className="space-y-3 rounded-2xl border border-border bg-surface p-4">
+          <div>
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm font-bold">가진 돈</span>
+              <span className="tabular text-lg font-bold">
+                {formatWon(assets.total)}
+              </span>
+            </div>
+
+            <ul className="mt-2 space-y-1">
+              {[
+                { label: "현금", value: assets.cash },
+                { label: "입출금", value: assets.checking },
+                { label: "예적금", value: assets.savings },
+                { label: "투자", value: assets.investment },
+                { label: "기타", value: assets.other },
+              ]
+                .filter((row) => row.value !== 0)
+                .map((row) => (
+                  <li
+                    key={row.label}
+                    className="flex items-center justify-between text-xs"
+                  >
+                    <span className="text-muted">{row.label}</span>
+                    <span className="tabular">{formatWon(row.value)}</span>
+                  </li>
+                ))}
+            </ul>
           </div>
-          <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
-            <span className="text-sm text-muted">다음 결제 예정</span>
-            <span className="tabular text-lg font-bold text-expense">
-              {formatWon(totalUpcoming)}
-            </span>
+
+          <div className="border-t border-border pt-3">
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm font-bold">갚을 돈</span>
+              <span className="tabular text-lg font-bold text-expense">
+                {formatWon(totalUpcoming + assets.loanDebt)}
+              </span>
+            </div>
+
+            <ul className="mt-2 space-y-1">
+              <li className="flex items-center justify-between text-xs">
+                <span className="text-muted">다음 카드 결제</span>
+                <span className="tabular">{formatWon(totalUpcoming)}</span>
+              </li>
+              {assets.loanDebt > 0 && (
+                <li className="flex items-center justify-between text-xs">
+                  <span className="text-muted">대출 잔액</span>
+                  <span className="tabular">{formatWon(assets.loanDebt)}</span>
+                </li>
+              )}
+            </ul>
           </div>
         </section>
 
@@ -172,7 +216,10 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                           : null}
                         {/* 체크카드는 결제일 대신 어느 통장에서 빠지는지가 중요하다 */}
                         {!isCredit && card.paymentAccount
-                          ? ` · ${card.paymentAccount.name} 즉시출금`
+                          ? ` · ${card.paymentAccount.name}에서 즉시출금`
+                          : null}
+                        {!isCredit && !card.paymentAccount
+                          ? " · 통장 미연결"
                           : null}
                       </p>
                     </Link>
@@ -201,7 +248,7 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                           </>
                         ) : (
                           <p className="text-[10px] text-muted">
-                            {Number(yearMonth.split("-")[1])}월 사용액
+                            {Number(yearMonth.split("-")[1])}월 쓴 금액
                           </p>
                         )}
                       </div>
@@ -217,6 +264,20 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                       )}
                     </div>
                   </div>
+
+                  {/* 체크카드: 연결 통장에 남은 돈 (카드 잔액이 아니라는 걸 분명히) */}
+                  {!isCredit && card.paymentAccountId && (
+                    <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
+                      <span className="text-[11px] text-muted">
+                        {card.paymentAccount?.name ?? "연결 통장"}에 남은 돈
+                      </span>
+                      <span className="tabular text-sm font-medium">
+                        {formatWon(
+                          balanceByAccount.get(card.paymentAccountId) ?? 0,
+                        )}
+                      </span>
+                    </div>
+                  )}
 
                   {isCredit && total > 0 && (
                     <div className="grid grid-cols-2 gap-px border-t border-border bg-border">

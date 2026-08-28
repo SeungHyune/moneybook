@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Pencil } from "lucide-react";
+import { ChevronLeft, Pencil, Plus } from "lucide-react";
 import { AssetDetail } from "@/components/asset-detail";
 import { BillingSwitcher } from "@/components/billing-switcher";
 import { CardStatementActions } from "@/components/card-statement-actions";
@@ -205,6 +205,27 @@ export default async function CardDetailPage({
               isOverdue={isOverdue}
             />
           </div>
+        )}
+
+        {/*
+          막 등록한 카드는 청구서가 비어 있다 — 기존에 쓴 카드값을
+          한 번에 넣을 수 있게 안내한다.
+        */}
+        {detail.total === 0 && canEdit && (
+          <Link
+            href={`/cards/${card.id}/opening`}
+            className="flex items-center justify-between gap-2 rounded-2xl border border-dashed border-border bg-surface px-4 py-3.5 transition active:bg-surface-muted"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">
+                이미 쓴 카드값이 있나요?
+              </span>
+              <span className="block text-xs text-muted">
+                일시불·할부 금액만 넣으면 청구서에 반영돼요
+              </span>
+            </span>
+            <Plus className="size-5 shrink-0 text-primary" />
+          </Link>
         )}
 
         {/* 일시불 / 할부 탭 */}
