@@ -362,9 +362,11 @@ function CardForm({
             결제일이 이른 달(1~10일)이면 전전월 사용분이 청구되는 게 정상입니다.
           </p>
 
+          {/* 수정 모드에서는 아래 PaymentAccountChanger 가 담당한다 */}
           <Field
             label="출금 통장"
             hint="결제일에 카드대금이 빠져나가는 통장이에요. 연결해두면 카드/자산 화면에서 바로 납부 처리할 수 있습니다."
+            className={isEdit ? "hidden" : undefined}
           >
             <Select
               name="paymentAccountId"

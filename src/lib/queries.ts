@@ -5,7 +5,12 @@ import {
   getUpcomingStatementPeriod,
   type StatementPeriod,
 } from "@/lib/billing";
-import { dayOfMonthToDate, toYearMonth } from "@/lib/utils";
+import {
+  addMonths,
+  dayOfMonthToDate,
+  fromYearMonth,
+  toYearMonth,
+} from "@/lib/utils";
 
 /**
  * 가계부 한 달의 실제 시작/끝.
@@ -234,6 +239,166 @@ export async function getCardBillings(
   });
 }
 
+/** 납부 되돌리기를 열어 두는 기간 — actions/statement.ts 와 같은 값 */
+const UNDO_WINDOW_DAYS = 30;
+
+export type CardStatementDetail = NonNullable<
+  Awaited<ReturnType<typeof getCardStatementDetail>>
+>;
+
+/**
+ * 신용카드 청구서 한 장.
+ *
+ * 달력 월이 아니라 "결제일 기준"으로 본다 — 8월 25일 결제분이면
+ * 7/12~8/11 사용 내역이 담긴다. 실제 카드 명세서와 같은 단위다.
+ * 회차를 일시불/할부로 나눠 돌려주므로 화면에서 탭으로 가를 수 있다.
+ */
+export async function getCardStatementDetail(
+  householdId: string,
+  cardId: string,
+  yearMonth: string,
+) {
+  const card = await prisma.card.findFirst({
+    where: { id: cardId, householdId },
+    include: {
+      ownerMember: { select: { displayName: true } },
+      paymentAccount: { select: { id: true, name: true, bankName: true } },
+    },
+  });
+  if (!card) return null;
+
+  const period = getStatementPeriod(card, yearMonth);
+  if (!period) return null;
+
+  const [year, month] = yearMonth.split("-").map(Number);
+  const monthStart = new Date(year, month - 1, 1);
+  const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
+
+  const [plans, statement] = await Promise.all([
+    prisma.installmentPlan.findMany({
+      where: {
+        billingDate: { gte: monthStart, lte: monthEnd },
+        transaction: { cardId, householdId },
+      },
+      include: {
+        transaction: {
+          include: {
+            category: { select: { name: true, icon: true, color: true } },
+            card: {
+              select: {
+                name: true,
+                issuer: true,
+                color: true,
+                last4: true,
+                ownerMember: { select: { displayName: true } },
+              },
+            },
+            account: {
+              select: {
+                name: true,
+                bankName: true,
+                ownerMember: { select: { displayName: true } },
+              },
+            },
+            payer: { select: { displayName: true, color: true } },
+          },
+        },
+      },
+      orderBy: { transaction: { occurredAt: "desc" } },
+    }),
+    prisma.cardStatement.findUnique({
+      where: { cardId_yearMonth: { cardId, yearMonth } },
+    }),
+  ]);
+
+  const lumpSumItems = plans.filter((plan) => plan.totalRounds === 1);
+  const installmentItems = plans.filter((plan) => plan.totalRounds > 1);
+
+  const sum = (items: typeof plans) =>
+    items.reduce((total, plan) => total + plan.amount, 0);
+
+  /*
+   * 되돌리기는 납부 후 UNDO_WINDOW_DAYS 까지만 (actions/statement.ts 와 같은 값).
+   * 이 계산을 화면이 아니라 여기서 하는 이유: 컴포넌트 렌더 중 Date.now() 는
+   * React 순수성 규칙에 걸린다.
+   */
+  const now = Date.now();
+  const canUndo = statement?.paidAt
+    ? Math.floor((now - statement.paidAt.getTime()) / 86_400_000) <=
+      UNDO_WINDOW_DAYS
+    : true;
+  const isOverdue = !statement?.isPaid && period.billingDate.getTime() < now;
+
+  return {
+    card,
+    period,
+    statement,
+    canUndo,
+    isOverdue,
+    all: plans,
+    lumpSumItems,
+    installmentItems,
+    lumpSum: sum(lumpSumItems),
+    installment: sum(installmentItems),
+    total: sum(plans),
+  };
+}
+
+/**
+ * 청구서 선택기에 쓰는 목록.
+ * 다음 결제 예정분부터 과거로 monthsBack 개월치.
+ */
+export async function getCardBillingOptions(
+  householdId: string,
+  cardId: string,
+  monthsBack = 8,
+) {
+  const card = await prisma.card.findFirst({ where: { id: cardId, householdId } });
+  if (!card || card.type !== "CREDIT" || !card.billingDay) return [];
+
+  const today = new Date();
+  const upcoming = getUpcomingStatementPeriod(card, today);
+  const baseYearMonth = upcoming?.yearMonth ?? toYearMonth(today);
+
+  const yearMonths = Array.from({ length: monthsBack }, (_, index) =>
+    addMonths(baseYearMonth, -index),
+  );
+
+  // 전체 범위를 한 번에 읽고 월별로 나눈다
+  const oldest = fromYearMonth(yearMonths[yearMonths.length - 1]);
+  const newest = fromYearMonth(yearMonths[0]);
+
+  const [plans, statements] = await Promise.all([
+    prisma.installmentPlan.findMany({
+      where: {
+        billingDate: {
+          gte: new Date(oldest.getFullYear(), oldest.getMonth(), 1),
+          lte: new Date(newest.getFullYear(), newest.getMonth() + 1, 0, 23, 59, 59, 999),
+        },
+        transaction: { cardId, householdId },
+      },
+      select: { amount: true, billingDate: true },
+    }),
+    prisma.cardStatement.findMany({
+      where: { cardId, yearMonth: { in: yearMonths } },
+    }),
+  ]);
+
+  return yearMonths.map((yearMonth) => {
+    const period = getStatementPeriod(card, yearMonth);
+    const total = plans
+      .filter((plan) => toYearMonth(plan.billingDate) === yearMonth)
+      .reduce((sum, plan) => sum + plan.amount, 0);
+
+    return {
+      yearMonth,
+      period,
+      total,
+      statement: statements.find((row) => row.yearMonth === yearMonth) ?? null,
+    };
+  });
+}
+
 export type UpcomingCardPayment = Awaited<
   ReturnType<typeof getUpcomingCardPayments>
 >[number];
@@ -341,6 +506,12 @@ export async function getUpcomingCardPayments(
       installment,
       total: lumpSum + installment,
       statement,
+      canUndo: statement?.paidAt
+        ? Math.floor(
+            (Date.now() - statement.paidAt.getTime()) / 86_400_000,
+          ) <= UNDO_WINDOW_DAYS
+        : true,
+      isOverdue: !statement?.isPaid && period.billingDate < new Date(),
       dday: Math.round(
         (new Date(
           period.billingDate.getFullYear(),

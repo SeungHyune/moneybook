@@ -15,6 +15,9 @@ import type { ActionState } from "./household";
  * 계좌 잔액을 깎는다.
  */
 
+/** 되돌리기를 열어 두는 기간 — card-statement-actions.tsx 와 같은 값 */
+const UNDO_WINDOW_DAYS = 30;
+
 const paySchema = z.object({
   cardId: z.string().uuid(),
   yearMonth: z.string().regex(/^\d{4}-\d{2}$/),
@@ -22,6 +25,8 @@ const paySchema = z.object({
   amount: z.coerce.number().int().min(0),
   /** 결제 계좌. 비우면 카드에 연결된 계좌를 쓴다 */
   accountId: z.string().uuid().optional().or(z.literal("")),
+  /** 실제 납부일. 연체해서 늦게 낸 경우 예정일과 달라진다 */
+  paidAt: z.coerce.date().optional(),
 });
 
 export async function payCardStatement(
@@ -33,6 +38,7 @@ export async function payCardStatement(
     yearMonth: formData.get("yearMonth"),
     amount: formData.get("amount"),
     accountId: formData.get("accountId") ?? undefined,
+    paidAt: formData.get("paidAt") || undefined,
   });
 
   if (!parsed.success) {
@@ -40,6 +46,8 @@ export async function payCardStatement(
   }
 
   const { cardId, yearMonth, amount } = parsed.data;
+  // 연체해서 늦게 냈으면 그 날짜로 기록한다 (미입력이면 오늘)
+  const paidAt = parsed.data.paidAt ?? new Date();
 
   const card = await prisma.card.findUnique({ where: { id: cardId } });
   if (!card) return { error: "카드를 찾을 수 없어요." };
@@ -114,7 +122,7 @@ export async function payCardStatement(
         installmentAmount,
         totalAmount: amount,
         isPaid: true,
-        paidAt: new Date(),
+        paidAt,
       },
       update: {
         billingDate: period.billingDate,
@@ -124,7 +132,7 @@ export async function payCardStatement(
         installmentAmount,
         totalAmount: amount,
         isPaid: true,
-        paidAt: new Date(),
+        paidAt,
       },
     });
 
@@ -139,7 +147,8 @@ export async function payCardStatement(
         householdId: card.householdId,
         type: "EXPENSE",
         amount,
-        occurredAt: period.billingDate,
+        // 실제로 통장에서 빠진 날로 기록한다
+        occurredAt: paidAt,
         merchant: `${card.name} 대금`,
         memo: `${yearMonth} 카드대금 납부`,
         paymentMethod: "AUTO_DEBIT",
@@ -169,6 +178,16 @@ export async function cancelCardStatementPayment(
     where: { cardId_yearMonth: { cardId, yearMonth } },
   });
   if (!statement?.isPaid) return { error: "납부 기록이 없어요." };
+
+  // 오래된 납부는 되돌리지 않는다 — 그 사이 다음 청구서가 돌아갔을 가능성이 크다
+  const daysSincePaid = statement.paidAt
+    ? Math.floor((Date.now() - statement.paidAt.getTime()) / 86_400_000)
+    : 0;
+  if (daysSincePaid > UNDO_WINDOW_DAYS) {
+    return {
+      error: `납부한 지 ${UNDO_WINDOW_DAYS}일이 지나 되돌릴 수 없어요. 내역에서 직접 수정해 주세요.`,
+    };
+  }
 
   await prisma.$transaction(async (tx) => {
     // 납부하며 만든 기록을 찾아 되돌린다

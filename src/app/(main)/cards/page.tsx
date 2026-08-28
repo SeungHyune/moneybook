@@ -269,6 +269,8 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                       hasAccount={Boolean(card.paymentAccountId)}
                       isPaid={Boolean(statement?.isPaid)}
                       paidAmount={statement?.totalAmount ?? null}
+                      canUndo={upcoming?.canUndo ?? true}
+                      isOverdue={upcoming?.isOverdue ?? false}
                     />
                   )}
                 </li>

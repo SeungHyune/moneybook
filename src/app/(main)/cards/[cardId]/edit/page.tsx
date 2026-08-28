@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { CardEditScreen } from "@/components/asset-form";
+import { PaymentAccountChanger } from "@/components/payment-account-changer";
 import { canManageAsset, requireHouseholdContext } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getFormOptions } from "@/lib/queries";
@@ -25,7 +26,8 @@ export default async function EditCardPage({
   const options = await getFormOptions(household.id);
 
   return (
-    <CardEditScreen
+    <>
+      <CardEditScreen
       members={options.members}
       accounts={options.accounts}
       currentMember={{ id: member.id, role: member.role }}
@@ -44,5 +46,20 @@ export default async function EditCardPage({
         creditLimit: card.creditLimit,
       }}
     />
+
+      {/*
+        출금 통장은 과거 납부 건을 옮길지까지 물어야 해서 별도 폼으로 뺐다.
+        (카드 폼 안에서 바꾸면 "언제부터"를 물을 자리가 없다)
+      */}
+      {card.type === "CREDIT" && (
+        <div className="px-4 pb-8">
+          <PaymentAccountChanger
+            cardId={card.id}
+            currentAccountId={card.paymentAccountId}
+            accounts={options.accounts}
+          />
+        </div>
+      )}
+    </>
   );
 }
