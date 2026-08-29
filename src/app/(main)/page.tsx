@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { ArrowRight, CalendarClock, Camera, CreditCard } from "lucide-react";
+import { ArrowRight, Camera, TrendingDown } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { CategoryIcon } from "@/components/category-icon";
 import { MonthSwitcher } from "@/components/month-switcher";
@@ -15,20 +15,14 @@ import { prisma } from "@/lib/prisma";
 import { MemberFilter } from "@/components/member-filter";
 import { getMemberFilter } from "@/lib/member-filter";
 import {
+  getBudgetOverview,
   getCategoryBreakdown,
+  getHomeHero,
   getHouseholdMembers,
-  getMonthlySummary,
   getTransactions,
-  getUpcomingCardPayments,
-  getUpcomingFixed,
+  getCashflowHorizon,
 } from "@/lib/queries";
-import { RECURRING_KIND_META } from "@/lib/labels";
-import {
-  daysUntil,
-  formatWon,
-  formatWonShort,
-  toYearMonth,
-} from "@/lib/utils";
+import { formatWon, formatWonShort, toYearMonth } from "@/lib/utils";
 
 /**
  * 홈 화면.
@@ -93,7 +87,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
         </Suspense>
 
         <Suspense fallback={<SummarySkeleton />}>
-          <SummarySection
+          <HeroSection
             householdId={householdId}
             yearMonth={yearMonth}
             monthStartDay={monthStartDay}
@@ -101,12 +95,8 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
           />
         </Suspense>
 
-        <Suspense fallback={<SectionSkeleton rows={3} />}>
-          <UpcomingSection householdId={householdId} />
-        </Suspense>
-
-        <Suspense fallback={<SectionSkeleton rows={2} />}>
-          <CardBillingSection householdId={householdId} memberId={memberId} />
+        <Suspense fallback={<SectionSkeleton rows={4} />}>
+          <OutflowSection householdId={householdId} memberId={memberId} />
         </Suspense>
 
         <Suspense fallback={<SectionSkeleton rows={4} />}>
@@ -154,7 +144,14 @@ async function InboxBanner({ userId }: { userId: string }) {
   );
 }
 
-async function SummarySection({
+/**
+ * 홈 맨 위.
+ *
+ * 예산을 정했으면 "이번 달 더 쓸 수 있는 돈", 아니면 "다 내고 남는 돈".
+ * 예전엔 수입 − 지출을 보여줬는데, 앞으로 나갈 카드값이 안 빠진 값이라
+ * "더 써도 되나" 에 답을 못 했다.
+ */
+async function HeroSection({
   householdId,
   yearMonth,
   monthStartDay,
@@ -165,189 +162,218 @@ async function SummarySection({
   monthStartDay: number;
   memberId: string | null;
 }) {
-  const summary = await getMonthlySummary(
+  const hero = await getHomeHero(
     householdId,
     yearMonth,
     monthStartDay,
     memberId,
   );
 
-  return (
-    <section className="rounded-2xl bg-primary p-5 text-primary-foreground">
-      <p className="text-xs opacity-80">이번 달 남은 돈</p>
-      <p className="tabular mt-1 text-3xl font-bold tracking-tight">
-        {formatWon(summary.balance)}
-      </p>
+  const isBudget = hero.mode === "BUDGET";
+  const isShort = hero.amount < 0;
 
-      <div className="mt-4 grid grid-cols-2 gap-3 border-t border-white/20 pt-4">
-        <div>
-          <p className="text-xs opacity-80">수입</p>
-          <p className="tabular text-lg font-bold">
-            {formatWon(summary.income)}
+  return (
+    <section className="space-y-3">
+      <div className="rounded-2xl bg-primary p-5 text-primary-foreground">
+        <p className="text-xs opacity-80">
+          {isBudget ? "이번 달 더 쓸 수 있는 돈" : "다 내고 남는 돈"}
+        </p>
+        <p className="tabular mt-1 text-3xl font-bold tracking-tight">
+          {formatWon(hero.amount)}
+        </p>
+
+        {isBudget && hero.limit !== null ? (
+          <>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/25">
+              <div
+                className="h-full rounded-full bg-white"
+                style={{
+                  width: `${Math.min(100, (hero.spent / hero.limit) * 100)}%`,
+                }}
+              />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between text-xs opacity-90">
+              <span className="tabular">
+                {formatWon(hero.spent)} / {formatWon(hero.limit)}
+              </span>
+              <span>{Math.round((hero.spent / hero.limit) * 100)}%</span>
+            </div>
+
+            {hero.isCurrentMonth && hero.paceDiff !== null && (
+              <p className="mt-3 border-t border-white/20 pt-3 text-xs opacity-90">
+                {hero.paceDiff >= 0
+                  ? `${formatWon(hero.paceDiff)} 아끼고 있어요`
+                  : `적정보다 ${formatWon(-hero.paceDiff)} 더 썼어요`}
+                {hero.daysLeft > 0 && ` · ${hero.daysLeft}일 남음`}
+                {hero.fixedLeft > 0 &&
+                  ` · 남은 고정지출 ${formatWonShort(hero.fixedLeft)} 뺀 금액`}
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="mt-3 border-t border-white/20 pt-3 text-xs opacity-90">
+            가진 돈 {formatWonShort(hero.assets.total)}
+            {hero.comingTotal > 0 &&
+              ` + 들어올 돈 ${formatWonShort(hero.comingTotal)}`}{" "}
+            − 나갈 돈 {formatWonShort(hero.dueTotal)}
+            {isShort && " · 이대로면 모자라요"}
           </p>
-        </div>
-        <div>
-          <p className="text-xs opacity-80">지출</p>
-          <p className="tabular text-lg font-bold">
-            {formatWon(summary.expense)}
-          </p>
-        </div>
+        )}
       </div>
+
+      {/* 한 줄 요약 타일 — 눌러서 각 화면으로 */}
+      <div className="grid grid-cols-3 gap-2">
+        <Tile
+          href="/cards"
+          label="가진 돈"
+          value={formatWonShort(hero.assets.total)}
+        />
+        <Tile
+          href="/budget"
+          label="이번 달 쓴 돈"
+          value={formatWonShort(hero.spent)}
+        />
+        <Tile
+          href="/transactions"
+          label="이번 달 번 돈"
+          value={formatWonShort(hero.summary.income)}
+          tone="income"
+        />
+      </div>
+
+      {/* 예산이 없을 때만 권한다 — 있으면 위에서 이미 보여주고 있다 */}
+      {!isBudget && (
+        <Link
+          href="/budget/edit"
+          className="flex items-center justify-between gap-2 rounded-2xl border border-dashed border-border px-4 py-3 text-sm transition active:bg-surface-muted"
+        >
+          <span className="text-muted">
+            한 달 예산을 정하면 얼마나 더 써도 되는지 알려드려요
+          </span>
+          <ArrowRight className="size-4 shrink-0 text-muted" />
+        </Link>
+      )}
     </section>
   );
 }
 
-async function UpcomingSection({ householdId }: { householdId: string }) {
-  const upcoming = await getUpcomingFixed(householdId, 10);
-
+function Tile({
+  href,
+  label,
+  value,
+  tone,
+}: {
+  href: "/cards" | "/budget" | "/transactions";
+  label: string;
+  value: string;
+  tone?: "income";
+}) {
   return (
-    <SectionCard
-      title="다가오는 일정"
-      icon={<CalendarClock className="size-4" />}
-      href="/fixed"
+    <Link
+      href={href}
+      className="rounded-2xl border border-border bg-surface px-3 py-3 transition active:bg-surface-muted"
     >
-      {upcoming.length === 0 ? (
-        <EmptyHint
-          message="예정된 고정지출이 없어요."
-          actionLabel="고정지출 등록하기"
-          href="/fixed/new"
-        />
-      ) : (
-        <ul className="divide-y divide-border">
-          {upcoming.slice(0, 4).map((item) => {
-            const meta = RECURRING_KIND_META[item.rule.kind];
-            const dday = daysUntil(item.dueDate);
-
-            return (
-              <li
-                key={`${item.rule.id}-${item.dueDate.toISOString()}`}
-                className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
-              >
-                <CategoryIcon icon={meta.emoji} color={meta.color} size="md" />
-
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
-                    {item.rule.name}
-                  </p>
-                  <p className="text-xs text-muted">
-                    {item.dueDate.getMonth() + 1}월 {item.dueDate.getDate()}일
-                    {item.rule.isAmountVariable && " · 금액 변동"}
-                  </p>
-                </div>
-
-                <div className="text-right">
-                  <p
-                    className={`tabular text-sm font-bold ${
-                      item.rule.type === "INCOME"
-                        ? "text-income"
-                        : "text-foreground"
-                    }`}
-                  >
-                    {item.rule.type === "INCOME" ? "+" : ""}
-                    {formatWonShort(item.amount)}
-                  </p>
-                  <p
-                    className={`text-xs ${
-                      dday <= 2 ? "text-expense" : "text-muted"
-                    }`}
-                  >
-                    {dday === 0 ? "오늘" : `D-${dday}`}
-                  </p>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </SectionCard>
+      <p className="truncate text-[11px] text-muted">{label}</p>
+      <p
+        className={`tabular mt-0.5 truncate text-sm font-bold ${tone === "income" ? "text-income" : ""}`}
+      >
+        {value}
+      </p>
+    </Link>
   );
 }
 
 /**
- * 다가오는 카드 결제.
- *
- * 월 선택과 무관하게 "오늘 이후 가장 가까운 결제일"을 카드마다 따로 계산한다.
- * 결제일이 5일인 카드와 25일인 카드는 같은 날에도 기다리는 청구서가 다르다.
+ * 곧 나갈 돈 — 고정지출과 카드 결제를 한 리스트로.
+ * 나뉘어 있으면 "이번에 총 얼마 나가지" 를 눈으로 더해야 했다.
  */
-async function CardBillingSection({
+async function OutflowSection({
   householdId,
   memberId,
 }: {
   householdId: string;
   memberId: string | null;
 }) {
-  const payments = await getUpcomingCardPayments(householdId, memberId);
-
-  const pending = payments.filter(
-    (item) => item.total > 0 && !item.statement?.isPaid,
-  );
-  const totalBilling = pending.reduce((sum, item) => sum + item.total, 0);
+  const { outflows, outTotal: total, mergedIntoCard } =
+    await getCashflowHorizon(householdId, memberId);
 
   return (
     <SectionCard
-      title="다가오는 카드 결제"
-      icon={<CreditCard className="size-4" />}
-      href="/cards"
+      title="곧 나갈 돈"
+      icon={<TrendingDown className="size-4" />}
       trailing={
-        totalBilling > 0 ? (
-          <span className="tabular text-sm font-bold">
-            {formatWon(totalBilling)}
-          </span>
+        total > 0 ? (
+          <span className="tabular text-sm font-bold">{formatWon(total)}</span>
         ) : undefined
       }
     >
-      {pending.length === 0 ? (
+      {outflows.length === 0 ? (
         <EmptyHint
-          message="결제 예정인 카드값이 없어요."
-          actionLabel="카드 등록하기"
-          href="/cards/new"
+          message="3주 안에 나갈 돈이 없어요."
+          actionLabel="고정지출 등록하기"
+          href="/fixed/new"
         />
       ) : (
-        <ul className="space-y-3">
-          {pending.map(({ card, total, installment, period, dday }) => (
-            <li key={card.id} className="flex items-center gap-3">
-              <span
-                className="h-9 w-1.5 shrink-0 rounded-full"
-                style={{ backgroundColor: card.color }}
-                aria-hidden
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">
-                  {card.ownerMember?.displayName && (
-                    <span className="text-muted">
-                      {card.ownerMember.displayName} ·{" "}
-                    </span>
-                  )}
-                  {card.name}
-                </p>
-                <p className="text-xs text-muted">
-                  {period.billingDate.getMonth() + 1}월{" "}
-                  {period.billingDate.getDate()}일 결제
-                  {installment > 0 && ` · 할부 ${formatWonShort(installment)}`}
-                </p>
-                <p className="text-[11px] text-muted">
-                  {period.periodStart.getMonth() + 1}/
-                  {period.periodStart.getDate()} ~{" "}
-                  {period.periodEnd.getMonth() + 1}/
-                  {period.periodEnd.getDate()} 사용분
-                </p>
-              </div>
-              <div className="shrink-0 text-right">
-                <p className="tabular text-sm font-bold">{formatWon(total)}</p>
-                <p
-                  className={`text-xs ${dday <= 2 ? "text-expense" : "text-muted"}`}
-                >
-                  {dday === 0 ? "오늘" : `D-${dday}`}
-                </p>
-              </div>
+        <ul className="divide-y divide-border">
+          {outflows.slice(0, 6).map((item) => (
+            <li key={item.key}>
+              <Link
+                href={item.href}
+                className="-mx-2 flex items-center gap-3 rounded-xl px-2 py-3 transition active:bg-surface-muted"
+              >
+                <CategoryIcon
+                  icon={item.emoji}
+                  color={item.color}
+                  size="md"
+                />
+
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{item.name}</p>
+                  <p className="truncate text-xs text-muted">
+                    {item.date.getMonth() + 1}/{item.date.getDate()} ·{" "}
+                    {item.note}
+                  </p>
+                </div>
+
+                <div className="shrink-0 text-right">
+                  <p className="tabular text-sm font-bold">
+                    {formatWonShort(item.amount)}
+                  </p>
+                  <p
+                    className={`text-xs ${
+                      item.isOverdue || item.dday <= 2
+                        ? "text-expense"
+                        : "text-muted"
+                    }`}
+                  >
+                    {item.isOverdue
+                      ? `${-item.dday}일 밀림`
+                      : item.dday === 0
+                        ? "오늘"
+                        : `D-${item.dday}`}
+                  </p>
+                </div>
+              </Link>
             </li>
           ))}
         </ul>
+      )}
+
+      {mergedIntoCard > 0 && (
+        <p className="mt-3 border-t border-border pt-2.5 text-[11px] leading-relaxed text-muted">
+          신용카드로 내는 고정지출 {formatWonShort(mergedIntoCard)}은 카드
+          청구액에 이미 포함돼 있어요.
+        </p>
       )}
     </SectionCard>
   );
 }
 
+/**
+ * 카테고리별 지출.
+ * 한도를 정해뒀으면 예산 진행률로, 아니면 그냥 많이 쓴 순서로 보여준다.
+ * 한도가 없으면 "식비 55만" 이 많은 건지 알 수가 없다.
+ */
 async function BreakdownSection({
   householdId,
   yearMonth,
@@ -359,14 +385,61 @@ async function BreakdownSection({
   monthStartDay: number;
   memberId: string | null;
 }) {
-  const breakdown = await getCategoryBreakdown(
-    householdId,
-    yearMonth,
-    monthStartDay,
-    memberId,
-  );
+  const [breakdown, budget] = await Promise.all([
+    getCategoryBreakdown(householdId, yearMonth, monthStartDay, memberId),
+    getBudgetOverview(householdId, yearMonth, monthStartDay, memberId),
+  ]);
 
   if (breakdown.length === 0) return null;
+
+  const budgeted = budget.items.filter((item) => item.limit !== null);
+
+  if (budgeted.length > 0) {
+    return (
+      <SectionCard title="예산 쓴 만큼" href="/budget">
+        <ul className="space-y-3">
+          {budgeted.slice(0, 5).map((item) => {
+            const over = item.limit !== null && item.spent > item.limit;
+
+            return (
+              <li key={item.categoryId} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <CategoryIcon
+                      icon={item.icon}
+                      color={item.color}
+                      size="sm"
+                    />
+                    <span className="truncate">{item.name}</span>
+                  </span>
+                  <span
+                    className={`tabular shrink-0 text-xs ${over ? "font-bold text-expense" : "text-muted"}`}
+                  >
+                    {formatWonShort(item.spent)} /{" "}
+                    {formatWonShort(item.limit ?? 0)}
+                  </span>
+                </div>
+                <div
+                  className="h-1.5 overflow-hidden rounded-full bg-surface-muted"
+                  role="presentation"
+                >
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${Math.min(100, Math.max((item.ratio ?? 0) * 100, 2))}%`,
+                      backgroundColor: over
+                        ? "var(--color-expense)"
+                        : item.color,
+                    }}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </SectionCard>
+    );
+  }
 
   return (
     <SectionCard title="많이 쓴 곳" href="/transactions">

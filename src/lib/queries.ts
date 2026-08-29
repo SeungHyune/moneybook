@@ -5,9 +5,11 @@ import {
   getUpcomingStatementPeriod,
   type StatementPeriod,
 } from "@/lib/billing";
+import { RECURRING_KIND_META } from "@/lib/labels";
 import {
   addMonths,
   dayOfMonthToDate,
+  formatWonShort,
   fromYearMonth,
   toYearMonth,
 } from "@/lib/utils";
@@ -645,7 +647,16 @@ export async function getFixedSchedule(
   const rules = await prisma.recurringRule.findMany({
     where: { householdId, isActive: true },
     include: {
-      card: { select: { name: true, issuer: true, color: true, last4: true } },
+      card: {
+        select: {
+          name: true,
+          issuer: true,
+          color: true,
+          last4: true,
+          // 신용카드로 나가는 고정지출은 카드 청구서에 합쳐진다 (getUpcomingOutflows)
+          type: true,
+        },
+      },
       account: { select: { name: true, bankName: true } },
       category: { select: { name: true, icon: true, color: true } },
       occurrences: { where: { yearMonth } },
@@ -1082,4 +1093,218 @@ export async function getSavingsGoals(householdId: string) {
       ratio: Math.min(1, Math.max(0, ratio)),
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// 홈
+// ---------------------------------------------------------------------------
+
+export type Outflow = Awaited<
+  ReturnType<typeof getCashflowHorizon>
+>["outflows"][number];
+
+/**
+ * 앞으로 한 달, 통장에서 나갈 돈과 들어올 돈.
+ *
+ * 예전엔 홈에 "다가오는 일정" 과 "다가오는 카드 결제" 가 따로 있었다.
+ * 둘 다 "이번에 얼마가 빠져나가나" 라는 같은 질문에 답하는데 나뉘어 있어
+ * 총액을 알려면 눈으로 더해야 했다.
+ *
+ * 이중 계산을 두 군데서 막는다.
+ *  - 신용카드로 결제되는 고정지출(관리비 등)은 카드 청구서에 이미 들어 있다.
+ *    체크카드는 즉시 출금이라 청구서가 없으니 그대로 센다.
+ *  - "카드대금" 종류의 규칙도 카드 쪽에서 이미 세고 있다.
+ *
+ * 지난 날짜라도 아직 안 낸 것이면 그대로 남긴다.
+ */
+export async function getCashflowHorizon(
+  householdId: string,
+  memberId?: string | null,
+  days = 31,
+) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const limit = new Date(today);
+  limit.setDate(limit.getDate() + days);
+
+  const yearMonth = toYearMonth(today);
+
+  const [thisSchedule, nextSchedule, cards] = await Promise.all([
+    getFixedSchedule(householdId, yearMonth),
+    // 말일 근처에서는 다음 달 초 일정도 곧 나갈 돈이다
+    getFixedSchedule(householdId, addMonths(yearMonth, 1)),
+    getUpcomingCardPayments(householdId, memberId),
+  ]);
+
+  const dday = (date: Date) =>
+    Math.round(
+      (new Date(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate(),
+      ).getTime() -
+        today.getTime()) /
+        86_400_000,
+    );
+
+  const pending = [...thisSchedule, ...nextSchedule].filter(
+    (item) =>
+      item.status !== "PAID" &&
+      item.status !== "SKIPPED" &&
+      item.dueDate <= limit,
+  );
+
+  const fixed = pending
+    .filter(
+      (item) =>
+        item.rule.type === "EXPENSE" &&
+        item.rule.kind !== "CARD_BILL" &&
+        item.rule.card?.type !== "CREDIT",
+    )
+    .map((item) => {
+      const meta = RECURRING_KIND_META[item.rule.kind];
+
+      return {
+        key: `fixed-${item.rule.id}-${item.dueDate.toISOString()}`,
+        kind: "FIXED" as const,
+        name: item.rule.name,
+        note: item.rule.isAmountVariable ? "금액 변동" : meta.label,
+        amount: item.amount,
+        date: item.dueDate,
+        dday: dday(item.dueDate),
+        isOverdue: dday(item.dueDate) < 0,
+        emoji: meta.emoji,
+        color: meta.color,
+        href: "/fixed" as const,
+      };
+    });
+
+  const cardOutflows = cards
+    .filter((item) => item.total > 0 && !item.statement?.isPaid)
+    .map((item) => ({
+      key: `card-${item.card.id}`,
+      kind: "CARD" as const,
+      name: item.card.ownerMember?.displayName
+        ? `${item.card.ownerMember.displayName} · ${item.card.name}`
+        : item.card.name,
+      note:
+        item.installment > 0
+          ? `할부 ${formatWonShort(item.installment)} 포함`
+          : `${item.period.periodStart.getMonth() + 1}/${item.period.periodStart.getDate()}~${item.period.periodEnd.getMonth() + 1}/${item.period.periodEnd.getDate()} 사용분`,
+      amount: item.total,
+      date: item.period.billingDate,
+      dday: item.dday,
+      isOverdue: item.isOverdue,
+      emoji: "💳",
+      color: item.card.color,
+      href: `/cards/${item.card.id}` as const,
+    }));
+
+  const outflows = [...fixed, ...cardOutflows].sort(
+    (a, b) => a.date.getTime() - b.date.getTime(),
+  );
+
+  // 들어올 돈 — 이게 빠지면 월급 전날의 잔액이 늘 모자란 것처럼 보인다
+  const inflows = pending
+    .filter((item) => item.rule.type === "INCOME")
+    .map((item) => ({
+      name: item.rule.name,
+      amount: item.amount,
+      date: item.dueDate,
+      dday: dday(item.dueDate),
+    }))
+    .sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  return {
+    outflows,
+    inflows,
+    outTotal: outflows.reduce((sum, item) => sum + item.amount, 0),
+    inTotal: inflows.reduce((sum, item) => sum + item.amount, 0),
+    /** 신용카드로 나가서 카드 청구서에 합쳐진 고정지출 (안내용) */
+    mergedIntoCard: pending
+      .filter(
+        (item) =>
+          item.rule.type === "EXPENSE" && item.rule.card?.type === "CREDIT",
+      )
+      .reduce((sum, item) => sum + item.amount, 0),
+  };
+}
+
+/**
+ * 홈 맨 위의 큰 숫자.
+ *
+ * 예산을 정했으면 "이번 달 더 쓸 수 있는 돈" — 남은 고정지출까지 빼야
+ * 진짜 재량껏 쓸 수 있는 돈이 된다. 안 그러면 월말에 관리비가 아직
+ * 안 빠진 상태에서 "여유 있네" 로 보인다.
+ *
+ * 예산이 없으면 "다 내고 남는 돈" — 가진 돈에서 곧 나갈 돈을 뺀 값.
+ */
+export async function getHomeHero(
+  householdId: string,
+  yearMonth: string,
+  monthStartDay: number,
+  memberId?: string | null,
+) {
+  const [budget, assets, horizon, summary] = await Promise.all([
+    getBudgetOverview(householdId, yearMonth, monthStartDay, memberId),
+    getAssetSummary(householdId, memberId),
+    getCashflowHorizon(householdId, memberId),
+    getMonthlySummary(householdId, yearMonth, monthStartDay, memberId),
+  ]);
+
+  const dueTotal = horizon.outTotal;
+  const comingTotal = horizon.inTotal;
+
+  /*
+   * 예산에서 뺄 고정지출은 "이번 달 안에 아직 안 나간 것"만이다.
+   * 다음 달 몫까지 빼면 이번 달 여유가 실제보다 작게 나온다.
+   */
+  const monthEnd = getMonthRange(yearMonth, monthStartDay).end;
+  const fixedLeft = horizon.outflows
+    .filter((item) => item.kind === "FIXED" && item.date <= monthEnd)
+    .reduce((sum, item) => sum + item.amount, 0);
+
+  const progress = getMonthProgress(yearMonth, monthStartDay);
+
+  if (budget.monthlyLimit !== null) {
+    const limit = budget.monthlyLimit;
+    const spendable = limit - budget.totalSpent - fixedLeft;
+    const pace = Math.round(limit * progress.ratio);
+
+    return {
+      mode: "BUDGET" as const,
+      amount: spendable,
+      limit,
+      spent: budget.totalSpent,
+      fixedLeft,
+      /** 오늘까지 이 정도면 적정 */
+      pace,
+      /** 양수면 아끼는 중 */
+      paceDiff: pace - budget.totalSpent,
+      daysLeft: progress.daysLeft,
+      isCurrentMonth: progress.isCurrent,
+      assets,
+      dueTotal,
+      comingTotal,
+      summary,
+    };
+  }
+
+  return {
+    mode: "CASHFLOW" as const,
+    // 들어올 월급을 빼먹으면 월급 전날마다 "모자람" 으로 보인다
+    amount: assets.total + comingTotal - dueTotal,
+    limit: null,
+    spent: budget.totalSpent,
+    fixedLeft,
+    pace: null,
+    paceDiff: null,
+    daysLeft: progress.daysLeft,
+    isCurrentMonth: progress.isCurrent,
+    assets,
+    dueTotal,
+    comingTotal,
+    summary,
+  };
 }

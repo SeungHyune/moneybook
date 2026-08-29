@@ -35,6 +35,8 @@ export type TransactionRowData = {
     ownerMember?: { displayName: string | null } | null;
   } | null;
   payer: { displayName: string | null; color: string } | null;
+  /** 통계 합계에서 빠지는 건 (카드대금 납부, 기존 카드값 등) */
+  excludeFromStats?: boolean;
 };
 
 /**
@@ -63,6 +65,7 @@ export function TransactionRow({
     account,
     payer,
     occurredAt,
+    excludeFromStats,
   } = transaction;
 
   const title = merchant || category?.name || memo || "내역";
@@ -84,8 +87,15 @@ export function TransactionRow({
     methodParts.push(PAYMENT_METHOD_LABEL[paymentMethod]);
   }
 
-  const amountColor =
-    type === "INCOME"
+  /*
+   * 카드대금 납부처럼 합계에서 빠지는 건은 흐리게 둔다.
+   * 개별 결제가 이미 지출로 잡혀 있어 이것까지 세면 이중 계산이 되는데,
+   * 통장에서 실제로 나간 돈이라 목록에서 지우지는 않는다.
+   * 표시를 안 하면 "목록을 더해도 합계와 안 맞는" 상태가 된다.
+   */
+  const amountColor = excludeFromStats
+    ? "text-muted"
+    : type === "INCOME"
       ? "text-income"
       : type === "TRANSFER"
         ? "text-transfer"
@@ -102,7 +112,14 @@ export function TransactionRow({
       />
 
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{title}</p>
+        <p className="flex items-center gap-1.5 text-sm font-medium">
+          <span className="truncate">{title}</span>
+          {excludeFromStats && (
+            <span className="shrink-0 rounded-md bg-surface-muted px-1.5 py-0.5 text-[10px] font-normal text-muted">
+              합계 제외
+            </span>
+          )}
+        </p>
         <p className="truncate text-xs text-muted">
           {showDate && `${occurredAt.getDate()}일 · `}
           {methodParts.join(" · ")}
