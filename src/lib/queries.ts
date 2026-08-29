@@ -46,6 +46,8 @@ export async function getMonthlySummary(
   yearMonth: string,
   monthStartDay: number,
   memberId?: string | null,
+  /** 카테고리로 걸러 볼 때 — 요약도 같이 걸러야 합계가 목록과 맞는다 */
+  categoryId?: string | null,
 ) {
   const { start, end } = getMonthRange(yearMonth, monthStartDay);
 
@@ -56,6 +58,11 @@ export async function getMonthlySummary(
       occurredAt: { gte: start, lte: end },
       excludeFromStats: false,
       ...(memberId ? { payerMemberId: memberId } : {}),
+      ...(categoryId === "none"
+        ? { categoryId: null }
+        : categoryId
+          ? { categoryId }
+          : {}),
     },
     _sum: { amount: true },
     _count: true,

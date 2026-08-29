@@ -4,6 +4,7 @@ import { MemberFilter } from "@/components/member-filter";
 import { MonthSwitcher } from "@/components/month-switcher";
 import { TransactionRow } from "@/components/transaction-row";
 import { requireHouseholdContext } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { getMemberFilter } from "@/lib/member-filter";
 import {
   getHouseholdMembers,
@@ -33,8 +34,13 @@ export default async function TransactionsPage({
       ? monthParam
       : toYearMonth(new Date());
 
-  // 예산 화면의 "미분류 정리하기" 에서 넘어온다
-  const onlyUncategorized = params.category === "none";
+  /*
+   * 카테고리 필터. "none" 은 미분류(예산 화면의 "미분류 정리하기"),
+   * uuid 면 그 카테고리 — 홈/예산의 카테고리 줄을 눌러서 들어온다.
+   */
+  const categoryParam =
+    typeof params.category === "string" ? params.category : undefined;
+  const onlyUncategorized = categoryParam === "none";
 
   const typeParam = params.type;
   const type =
@@ -48,12 +54,23 @@ export default async function TransactionsPage({
   ]);
   const memberId = filterMember?.id ?? null;
 
+  // 배너에 쓸 카테고리 이름 (uuid 로 거른 경우)
+  const filterCategory =
+    categoryParam && categoryParam !== "none"
+      ? await prisma.category.findFirst({
+          where: { id: categoryParam, householdId: household.id },
+          select: { name: true },
+        })
+      : null;
+  const filterCategoryName = filterCategory?.name ?? null;
+
   const [summary, transactions] = await Promise.all([
     getMonthlySummary(
       household.id,
       yearMonth,
       household.monthStartDay,
       memberId,
+      categoryParam,
     ),
     getTransactions(household.id, {
       yearMonth,
@@ -61,7 +78,7 @@ export default async function TransactionsPage({
       type,
       take: 200,
       payerMemberId: memberId,
-      ...(onlyUncategorized ? { categoryId: "none" } : {}),
+      ...(categoryParam ? { categoryId: categoryParam } : {}),
     }),
   ]);
 
@@ -111,15 +128,27 @@ export default async function TransactionsPage({
           </div>
         </div>
 
-        {/* 미분류만 보는 중 — 어디서 왔는지, 어떻게 빠져나가는지 알려준다 */}
-        {onlyUncategorized && (
-          <div className="flex items-center justify-between gap-2 rounded-2xl bg-warning/10 px-4 py-3">
-            <p className="text-sm font-medium text-warning">
-              카테고리를 안 정한 내역만 보고 있어요
+        {/* 걸러 보는 중이면 무엇으로 걸렀는지, 어떻게 풀지 알려준다 */}
+        {categoryParam && (
+          <div
+            className={`flex items-center justify-between gap-2 rounded-2xl px-4 py-3 ${
+              onlyUncategorized ? "bg-warning/10" : "bg-surface-muted"
+            }`}
+          >
+            <p
+              className={`min-w-0 truncate text-sm font-medium ${
+                onlyUncategorized ? "text-warning" : ""
+              }`}
+            >
+              {onlyUncategorized
+                ? "카테고리를 안 정한 내역만 보고 있어요"
+                : `${filterCategoryName ?? "선택한 항목"} 내역만 보고 있어요`}
             </p>
             <Link
               href={`/transactions?month=${yearMonth}`}
-              className="shrink-0 text-xs text-warning underline underline-offset-2"
+              className={`shrink-0 text-xs underline underline-offset-2 ${
+                onlyUncategorized ? "text-warning" : "text-muted"
+              }`}
             >
               전체 보기
             </Link>
@@ -132,7 +161,7 @@ export default async function TransactionsPage({
             const isActive = (type ?? "") === filter.value;
             const query = new URLSearchParams({ month: yearMonth });
             if (filter.value) query.set("type", filter.value);
-            if (onlyUncategorized) query.set("category", "none");
+            if (categoryParam) query.set("category", categoryParam);
 
             return (
               <Link

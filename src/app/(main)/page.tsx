@@ -176,7 +176,7 @@ async function HeroSection({
     <section className="space-y-3">
       <div className="rounded-2xl bg-primary p-5 text-primary-foreground">
         <p className="text-xs opacity-80">
-          {isBudget ? "이번 달 더 쓸 수 있는 돈" : "다 내고 남는 돈"}
+          {isBudget ? "이번 달 더 쓸 수 있는 돈" : "한 달 뒤 남을 돈"}
         </p>
         <p className="tabular mt-1 text-3xl font-bold tracking-tight">
           {formatWon(hero.amount)}
@@ -211,13 +211,17 @@ async function HeroSection({
             )}
           </>
         ) : (
-          <p className="mt-3 border-t border-white/20 pt-3 text-xs opacity-90">
+          <Link
+            href="/outflows"
+            className="mt-3 block border-t border-white/20 pt-3 text-xs opacity-90"
+          >
             가진 돈 {formatWonShort(hero.assets.total)}
             {hero.comingTotal > 0 &&
               ` + 들어올 돈 ${formatWonShort(hero.comingTotal)}`}{" "}
             − 나갈 돈 {formatWonShort(hero.dueTotal)}
             {isShort && " · 이대로면 모자라요"}
-          </p>
+            <span className="ml-1 underline underline-offset-2">자세히</span>
+          </Link>
         )}
       </div>
 
@@ -299,8 +303,9 @@ async function OutflowSection({
 
   return (
     <SectionCard
-      title="곧 나갈 돈"
+      title="앞으로 한 달, 나갈 돈"
       icon={<TrendingDown className="size-4" />}
+      href="/outflows"
       trailing={
         total > 0 ? (
           <span className="tabular text-sm font-bold">{formatWon(total)}</span>
@@ -309,13 +314,13 @@ async function OutflowSection({
     >
       {outflows.length === 0 ? (
         <EmptyHint
-          message="3주 안에 나갈 돈이 없어요."
+          message="한 달 안에 나갈 돈이 없어요."
           actionLabel="고정지출 등록하기"
           href="/fixed/new"
         />
       ) : (
         <ul className="divide-y divide-border">
-          {outflows.slice(0, 6).map((item) => (
+          {outflows.slice(0, 5).map((item) => (
             <li key={item.key}>
               <Link
                 href={item.href}
@@ -357,6 +362,15 @@ async function OutflowSection({
             </li>
           ))}
         </ul>
+      )}
+
+      {outflows.length > 5 && (
+        <Link
+          href="/outflows"
+          className="mt-2 block border-t border-border pt-2.5 text-center text-xs text-primary"
+        >
+          {outflows.length - 5}건 더 보기
+        </Link>
       )}
 
       {mergedIntoCard > 0 && (
@@ -402,7 +416,11 @@ async function BreakdownSection({
             const over = item.limit !== null && item.spent > item.limit;
 
             return (
-              <li key={item.categoryId} className="space-y-1.5">
+              <li key={item.categoryId}>
+                <Link
+                  href={`/transactions?month=${yearMonth}&category=${item.categoryId}`}
+                  className="-mx-2 block space-y-1.5 rounded-xl px-2 py-1 transition active:bg-surface-muted"
+                >
                 <div className="flex items-center justify-between gap-2 text-sm">
                   <span className="flex min-w-0 items-center gap-2">
                     <CategoryIcon
@@ -433,6 +451,7 @@ async function BreakdownSection({
                     }}
                   />
                 </div>
+                </Link>
               </li>
             );
           })}
@@ -445,28 +464,34 @@ async function BreakdownSection({
     <SectionCard title="많이 쓴 곳" href="/transactions">
       <ul className="space-y-3">
         {breakdown.slice(0, 5).map((item) => (
-          <li key={item.categoryId ?? "none"} className="space-y-1.5">
-            <div className="flex items-center justify-between gap-2 text-sm">
-              <span className="flex min-w-0 items-center gap-2">
-                <CategoryIcon icon={item.icon} color={item.color} size="sm" />
-                <span className="truncate">{item.name}</span>
-              </span>
-              <span className="tabular shrink-0 font-medium">
-                {formatWon(item.amount)}
-              </span>
-            </div>
-            <div
-              className="h-1.5 overflow-hidden rounded-full bg-surface-muted"
-              role="presentation"
+          <li key={item.categoryId ?? "none"}>
+            {/* 눌러서 이 항목 내역만 본다 — 금액만 보면 왜 큰지 알 수 없다 */}
+            <Link
+              href={`/transactions?month=${yearMonth}&category=${item.categoryId ?? "none"}`}
+              className="-mx-2 block space-y-1.5 rounded-xl px-2 py-1 transition active:bg-surface-muted"
             >
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <span className="flex min-w-0 items-center gap-2">
+                  <CategoryIcon icon={item.icon} color={item.color} size="sm" />
+                  <span className="truncate">{item.name}</span>
+                </span>
+                <span className="tabular shrink-0 font-medium">
+                  {formatWon(item.amount)}
+                </span>
+              </div>
               <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${Math.max(item.ratio * 100, 2)}%`,
-                  backgroundColor: item.color,
-                }}
-              />
-            </div>
+                className="h-1.5 overflow-hidden rounded-full bg-surface-muted"
+                role="presentation"
+              >
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${Math.max(item.ratio * 100, 2)}%`,
+                    backgroundColor: item.color,
+                  }}
+                />
+              </div>
+            </Link>
           </li>
         ))}
       </ul>
