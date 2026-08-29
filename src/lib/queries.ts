@@ -729,9 +729,26 @@ export type FixedScheduleItem = Awaited<
 export async function getFixedSchedule(
   householdId: string,
   yearMonth: string,
+  /*
+   * 구성원 보기. 규칙 자체에는 주인이 없고 결제 수단에 있으므로,
+   * 연결된 카드나 계좌의 소유자로 가른다. 카드/계좌를 안 붙인 규칙은
+   * 누구 것인지 알 수 없어 개인 보기에서는 빠진다.
+   */
+  memberId?: string | null,
 ) {
   const rules = await prisma.recurringRule.findMany({
-    where: { householdId, isActive: true },
+    where: {
+      householdId,
+      isActive: true,
+      ...(memberId
+        ? {
+            OR: [
+              { card: { ownerMemberId: memberId } },
+              { account: { ownerMemberId: memberId } },
+            ],
+          }
+        : {}),
+    },
     include: {
       card: {
         select: {
@@ -1007,9 +1024,13 @@ export async function getHouseholdMembers(householdId: string) {
 }
 
 /** 다가오는 고정지출 (오늘 이후 7일 이내) — 홈 화면 알림용 */
-export async function getUpcomingFixed(householdId: string, days = 7) {
+export async function getUpcomingFixed(
+  householdId: string,
+  days = 7,
+  memberId?: string | null,
+) {
   const yearMonth = toYearMonth(new Date());
-  const schedule = await getFixedSchedule(householdId, yearMonth);
+  const schedule = await getFixedSchedule(householdId, yearMonth, memberId);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -1028,7 +1049,7 @@ export async function getUpcomingFixed(householdId: string, days = 7) {
   // 달을 넘어가는 구간(예: 말일에 다음 달 초 일정)도 함께 본다
   if (limit.getMonth() !== today.getMonth()) {
     const nextMonth = toYearMonth(limit);
-    const nextSchedule = await getFixedSchedule(householdId, nextMonth);
+    const nextSchedule = await getFixedSchedule(householdId, nextMonth, memberId);
 
     thisMonth.push(
       ...nextSchedule.filter(
@@ -1225,9 +1246,9 @@ export async function getCashflowHorizon(
   const yearMonth = toYearMonth(today);
 
   const [thisSchedule, nextSchedule, cards] = await Promise.all([
-    getFixedSchedule(householdId, yearMonth),
+    getFixedSchedule(householdId, yearMonth, memberId),
     // 말일 근처에서는 다음 달 초 일정도 곧 나갈 돈이다
-    getFixedSchedule(householdId, addMonths(yearMonth, 1)),
+    getFixedSchedule(householdId, addMonths(yearMonth, 1), memberId),
     getUpcomingCardPayments(householdId, memberId),
   ]);
 
