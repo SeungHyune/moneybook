@@ -72,6 +72,13 @@ export async function getMonthlySummary(
     grouped.find((row) => row.type === "INCOME")?._sum.amount ?? 0;
   const expense =
     grouped.find((row) => row.type === "EXPENSE")?._sum.amount ?? 0;
+  /*
+   * 계좌 간 이동은 수입도 지출도 아니다 — 내 통장에서 내 통장으로 옮긴 것뿐이라
+   * 총액이 줄지 않는다. 합계에는 넣지 않되, 얼마가 오갔는지는 따로 돌려준다.
+   * (화면에 안 보이면 "이게 지출에 잡힌 건가" 하고 의심하게 된다)
+   */
+  const transfer =
+    grouped.find((row) => row.type === "TRANSFER")?._sum.amount ?? 0;
   const count = grouped.reduce((sum, row) => sum + row._count, 0);
 
   return {
@@ -80,6 +87,7 @@ export async function getMonthlySummary(
     end,
     income,
     expense,
+    transfer,
     balance: income - expense,
     count,
   };
@@ -766,6 +774,14 @@ export async function getTransactions(
         },
       },
       account: {
+        select: {
+          name: true,
+          bankName: true,
+          ownerMember: { select: { displayName: true } },
+        },
+      },
+      // 이체는 "어디서 어디로" 를 봐야 계좌 간 이동인지 알 수 있다
+      toAccount: {
         select: {
           name: true,
           bankName: true,

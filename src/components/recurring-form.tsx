@@ -86,7 +86,16 @@ export function RecurringForm({
   const [isAmountVariable, setIsAmountVariable] = useState(false);
 
   const meta = RECURRING_KIND_META[kind];
-  const type = meta.type;
+
+  /*
+   * 적금 납입이나 대출 상환은 돈이 없어지는 게 아니라 내 계좌 사이를
+   * 옮기는 것이다. 지출로 넣으면 "이번 달 쓴 돈" 이 실제보다 커진다.
+   * 그래서 지출 성격 항목에 한해 "이체로 등록" 을 고를 수 있게 뒀다.
+   */
+  const [asTransfer, setAsTransfer] = useState(false);
+  const canBeTransfer = meta.type === "EXPENSE" && options.accounts.length >= 2;
+  const isTransfer = canBeTransfer && asTransfer;
+  const type = isTransfer ? "TRANSFER" : meta.type;
 
   const categories = options.categories.filter(
     (category) => category.type === type,
@@ -153,8 +162,31 @@ export function RecurringForm({
             })}
           </div>
           <p className="text-xs text-muted">
-            {type === "INCOME" ? "수입 항목으로 등록됩니다" : "지출 항목으로 등록됩니다"}
+            {type === "INCOME"
+              ? "수입 항목으로 등록됩니다"
+              : isTransfer
+                ? "계좌 간 이동으로 등록됩니다 — 지출 합계에 잡히지 않아요"
+                : "지출 항목으로 등록됩니다"}
           </p>
+
+          {canBeTransfer && (
+            <label className="flex items-start gap-2.5 rounded-xl bg-surface-muted px-3 py-2.5">
+              <input
+                type="checkbox"
+                checked={asTransfer}
+                onChange={(event) => setAsTransfer(event.target.checked)}
+                className="mt-0.5 size-4 shrink-0 accent-[var(--color-primary)]"
+              />
+              <span className="text-xs leading-relaxed">
+                <strong className="font-medium">내 계좌로 옮기는 거예요</strong>
+                <br />
+                <span className="text-muted">
+                  적금 납입이나 파킹통장 이체처럼 돈이 없어지는 게 아니라
+                  자리만 바뀌는 경우예요. 지출로 세지 않습니다.
+                </span>
+              </span>
+            </label>
+          )}
         </div>
 
         <Field label="이름">
@@ -293,8 +325,16 @@ export function RecurringForm({
             </Select>
           </Field>
         ) : (
-          <Field label={type === "INCOME" ? "입금 계좌" : "출금 계좌"}>
-            <Select name="accountId" defaultValue="">
+          <Field
+            label={
+              type === "INCOME"
+                ? "입금 계좌"
+                : isTransfer
+                  ? "보내는 계좌"
+                  : "출금 계좌"
+            }
+          >
+            <Select name="accountId" defaultValue="" required={isTransfer}>
               <option value="">선택 안 함</option>
               {options.accounts.map((account) => (
                 <option key={account.id} value={account.id}>
@@ -307,6 +347,25 @@ export function RecurringForm({
           </Field>
         )}
 
+        {isTransfer && (
+          <Field label="받는 계좌">
+            <Select name="toAccountId" defaultValue="" required>
+              <option value="">선택하세요</option>
+              {options.accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {ownerPrefix(account.ownerMember)}
+                  {account.bankName ? `${account.bankName} ` : ""}
+                  {account.name}
+                </option>
+              ))}
+            </Select>
+            <p className="mt-1 text-xs text-muted">
+              적금 통장이 목록에 없으면 카드/자산에서 먼저 등록해 주세요.
+            </p>
+          </Field>
+        )}
+
+        {!isTransfer && (
         <Field label="카테고리">
           <Select name="categoryId" defaultValue="">
             <option value="">선택 안 함</option>
@@ -317,6 +376,7 @@ export function RecurringForm({
             ))}
           </Select>
         </Field>
+        )}
 
         <Field label="알림" hint="납부일 전에 알려드려요.">
           <Select name="notifyDaysBefore" defaultValue="1">

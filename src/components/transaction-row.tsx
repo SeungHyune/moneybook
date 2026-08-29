@@ -34,6 +34,12 @@ export type TransactionRowData = {
     bankName: string | null;
     ownerMember?: { displayName: string | null } | null;
   } | null;
+  /** 이체 받는 계좌 */
+  toAccount?: {
+    name: string;
+    bankName: string | null;
+    ownerMember?: { displayName: string | null } | null;
+  } | null;
   payer: { displayName: string | null; color: string } | null;
   /** 통계 합계에서 빠지는 건 (카드대금 납부, 기존 카드값 등) */
   excludeFromStats?: boolean;
@@ -63,6 +69,7 @@ export function TransactionRow({
     category,
     card,
     account,
+    toAccount,
     payer,
     occurredAt,
     excludeFromStats,
@@ -73,7 +80,20 @@ export function TransactionRow({
   // 결제 수단 표기: "신한 Deep Dream · 3개월 할부"
   const methodParts: string[] = [];
 
-  if (card) {
+  /*
+   * 이체는 "어디서 어디로" 가 전부다. 출금 계좌만 적으면 지출과 구분이 안 돼
+   * 돈이 나간 것처럼 읽힌다 — 실제로는 내 계좌 사이를 옮긴 것뿐이다.
+   */
+  if (type === "TRANSFER") {
+    methodParts.push(
+      [
+        account ? `${ownerPrefix(account.ownerMember)}${account.name}` : "?",
+        toAccount
+          ? `${ownerPrefix(toAccount.ownerMember)}${toAccount.name}`
+          : "?",
+      ].join(" → "),
+    );
+  } else if (card) {
     methodParts.push(
       `${ownerPrefix(card.ownerMember)}${card.last4 ? `${card.name} (${card.last4})` : card.name}`,
     );
@@ -114,6 +134,11 @@ export function TransactionRow({
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 text-sm font-medium">
           <span className="truncate">{title}</span>
+          {type === "TRANSFER" && (
+            <span className="shrink-0 rounded-md bg-transfer/15 px-1.5 py-0.5 text-[10px] font-normal text-transfer">
+              계좌 이동
+            </span>
+          )}
           {excludeFromStats && (
             <span className="shrink-0 rounded-md bg-surface-muted px-1.5 py-0.5 text-[10px] font-normal text-muted">
               합계 제외

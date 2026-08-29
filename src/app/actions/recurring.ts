@@ -29,7 +29,7 @@ const recurringSchema = z.object({
     "MEMBERSHIP",
     "OTHER",
   ]),
-  type: z.enum(["INCOME", "EXPENSE"]),
+  type: z.enum(["INCOME", "EXPENSE", "TRANSFER"]),
   amount: z.coerce.number().int().min(0),
   isAmountVariable: z.coerce.boolean().default(false),
 
@@ -55,6 +55,8 @@ const recurringSchema = z.object({
   ]),
   cardId: z.string().uuid().optional().or(z.literal("")),
   accountId: z.string().uuid().optional().or(z.literal("")),
+  /** 이체(TRANSFER)일 때 받는 계좌 */
+  toAccountId: z.string().uuid().optional().or(z.literal("")),
   categoryId: z.string().uuid().optional().or(z.literal("")),
 
   notifyDaysBefore: z.coerce.number().int().min(0).max(14).default(1),
@@ -105,6 +107,7 @@ export async function createRecurringRule(
       paymentMethod: data.paymentMethod,
       cardId: nullify(data.cardId),
       accountId: nullify(data.accountId),
+      toAccountId: nullify(data.toAccountId),
       categoryId: nullify(data.categoryId),
       startDate: new Date(),
       notifyDaysBefore: data.notifyDaysBefore,
@@ -197,6 +200,7 @@ export async function markOccurrencePaid(
         paymentMethod: rule.paymentMethod,
         cardId: rule.cardId,
         accountId: rule.accountId,
+        toAccountId: rule.toAccountId,
         payerMemberId: member.id,
         createdByMemberId: member.id,
         recurringRuleId: rule.id,
@@ -231,6 +235,17 @@ export async function markOccurrencePaid(
           rule.type === "INCOME"
             ? { balance: { increment: actualAmount } }
             : { balance: { decrement: actualAmount } },
+      });
+    }
+
+    /*
+     * 이체는 받는 쪽도 함께 올린다. 총액은 그대로고 자리만 옮기는 것이라
+     * 한쪽만 건드리면 자산이 사라진 것처럼 보인다.
+     */
+    if (rule.type === "TRANSFER" && rule.toAccountId) {
+      await tx.account.update({
+        where: { id: rule.toAccountId },
+        data: { balance: { increment: actualAmount } },
       });
     }
   });

@@ -312,7 +312,8 @@ model Account {
   transactions   Transaction[]   @relation("TxAccount")
   incomingTx     Transaction[]   @relation("TxToAccount")
   cards          Card[] //  이 계좌를 결제 계좌로 쓰는 카드들
-  recurringRules RecurringRule[]
+  recurringRules RecurringRule[] @relation("RuleAccount")
+  incomingRules  RecurringRule[] @relation("RuleToAccount")
   savingsGoals   SavingsGoal[]
 
   @@index([householdId])
@@ -536,6 +537,8 @@ model RecurringRule {
   paymentMethod PaymentMethod @default(AUTO_DEBIT)
   cardId        String?       @db.Uuid
   accountId     String?       @db.Uuid
+  /// type 이 TRANSFER 일 때 받는 계좌 (적금 납입, 파킹통장 이체 등)
+  toAccountId   String?       @db.Uuid
   categoryId    String?       @db.Uuid
 
   startDate        DateTime
@@ -552,7 +555,8 @@ model RecurringRule {
 
   household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
   card      Card?     @relation(fields: [cardId], references: [id], onDelete: SetNull)
-  account   Account?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  account   Account?  @relation("RuleAccount", fields: [accountId], references: [id], onDelete: SetNull)
+  toAccount Account?  @relation("RuleToAccount", fields: [toAccountId], references: [id], onDelete: SetNull)
   category  Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   occurrences  RecurringOccurrence[]

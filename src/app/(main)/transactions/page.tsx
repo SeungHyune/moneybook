@@ -128,6 +128,14 @@ export default async function TransactionsPage({
           </div>
         </div>
 
+        {/* 이체가 있으면 따로 알린다 — 위 지출에 안 들어갔다는 걸 알아야 한다 */}
+        {summary.transfer > 0 && (
+          <p className="-mt-2 px-1 text-[11px] leading-relaxed text-muted">
+            계좌 간 이동 {formatWon(summary.transfer)}은 내 통장 사이를 옮긴
+            것이라 수입·지출 어느 쪽에도 넣지 않았어요.
+          </p>
+        )}
+
         {/* 걸러 보는 중이면 무엇으로 걸렀는지, 어떻게 풀지 알려준다 */}
         {categoryParam && (
           <div
