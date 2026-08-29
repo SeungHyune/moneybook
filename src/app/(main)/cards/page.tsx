@@ -142,8 +142,11 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
             </p>
 
             <ul className="mt-2 space-y-1">
-              {upcomingPayments
-                .filter((item) => item.total > 0 && !item.statement?.isPaid)
+              {/*
+                청구액이 0원인 카드도 남겨둔다 — "이 카드는 다음에 언제 빠지지?"
+                에 답해야 하고, 빈 줄이 곧 "아직 쓴 게 없다"는 정보다.
+              */}
+              {[...upcomingPayments]
                 .sort((a, b) => a.dday - b.dday)
                 .map((item) => (
                   <li
@@ -152,14 +155,20 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                   >
                     <span className="min-w-0 truncate text-muted">
                       {item.period.billingDate.getMonth() + 1}/
-                      {item.period.billingDate.getDate()} · {item.card.name}
-                      {item.dday >= 0 && item.dday <= 3 && (
+                      {item.period.billingDate.getDate()} ·{" "}
+                      {item.card.issuer ? `${item.card.issuer} ` : ""}
+                      {item.card.name}
+                      {item.total > 0 && item.dday >= 0 && item.dday <= 3 && (
                         <span className="ml-1 text-expense">D-{item.dday}</span>
                       )}
                     </span>
-                    <span className="tabular shrink-0">
-                      {formatWon(item.total)}
-                    </span>
+                    {item.total > 0 ? (
+                      <span className="tabular shrink-0">
+                        {formatWon(item.total)}
+                      </span>
+                    ) : (
+                      <span className="shrink-0 text-muted/60">아직 없음</span>
+                    )}
                   </li>
                 ))}
 

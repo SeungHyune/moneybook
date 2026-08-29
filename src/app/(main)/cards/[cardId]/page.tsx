@@ -77,14 +77,17 @@ export default async function CardDetailPage({
   }
 
   // --- 신용카드: 청구서 뷰 ---
-  const options = await getCardBillingOptions(household.id, card.id);
+  const { options, defaultYearMonth } = await getCardBillingOptions(
+    household.id,
+    card.id,
+  );
 
   const billParam = query.bill;
   const selected =
     typeof billParam === "string" &&
     options.some((option) => option.yearMonth === billParam)
       ? billParam
-      : (options[0]?.yearMonth ?? toYearMonth(new Date()));
+      : defaultYearMonth;
 
   const detail = await getCardStatementDetail(household.id, card.id, selected);
   if (!detail) notFound();

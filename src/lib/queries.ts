@@ -352,17 +352,32 @@ export async function getCardBillingOptions(
   householdId: string,
   cardId: string,
   monthsBack = 8,
+  /*
+   * 다음 결제일 이후 회차도 고른다. 이번 회차를 미리 납부했으면 그 다음을
+   * 봐야 하는데, 과거만 담으면 갈 곳이 없다.
+   */
+  monthsAhead = 2,
 ) {
   const card = await prisma.card.findFirst({ where: { id: cardId, householdId } });
-  if (!card || card.type !== "CREDIT" || !card.billingDay) return [];
 
   const today = new Date();
+
+  if (!card || card.type !== "CREDIT" || !card.billingDay) {
+    return { options: [], defaultYearMonth: toYearMonth(today) };
+  }
+
   const upcoming = getUpcomingStatementPeriod(card, today);
   const baseYearMonth = upcoming?.yearMonth ?? toYearMonth(today);
 
-  const yearMonths = Array.from({ length: monthsBack }, (_, index) =>
-    addMonths(baseYearMonth, -index),
-  );
+  // 최신 → 과거 순
+  const yearMonths = [
+    ...Array.from({ length: monthsAhead }, (_, index) =>
+      addMonths(baseYearMonth, monthsAhead - index),
+    ),
+    ...Array.from({ length: monthsBack }, (_, index) =>
+      addMonths(baseYearMonth, -index),
+    ),
+  ];
 
   // 전체 범위를 한 번에 읽고 월별로 나눈다
   const oldest = fromYearMonth(yearMonths[yearMonths.length - 1]);
@@ -384,7 +399,7 @@ export async function getCardBillingOptions(
     }),
   ]);
 
-  return yearMonths.map((yearMonth) => {
+  const options = yearMonths.map((yearMonth) => {
     const period = getStatementPeriod(card, yearMonth);
     const total = plans
       .filter((plan) => toYearMonth(plan.billingDate) === yearMonth)
@@ -397,6 +412,22 @@ export async function getCardBillingOptions(
       statement: statements.find((row) => row.yearMonth === yearMonth) ?? null,
     };
   });
+
+  /*
+   * 처음 열었을 때 보여줄 회차 = 다음 결제일부터 훑어 아직 안 낸 첫 회차.
+   * 이번 회차를 이미 냈으면 그 다음이 열린다.
+   * (날짜 비교를 화면에서 하면 렌더 중 Date 접근이 되므로 여기서 정한다)
+   */
+  const ascending = [...options].reverse();
+  const fromUpcoming = ascending.filter(
+    (option) => option.yearMonth >= baseYearMonth,
+  );
+
+  const defaultYearMonth =
+    fromUpcoming.find((option) => !option.statement?.isPaid)?.yearMonth ??
+    baseYearMonth;
+
+  return { options, defaultYearMonth };
 }
 
 export type UpcomingCardPayment = Awaited<
@@ -432,17 +463,58 @@ export async function getUpcomingCardPayments(
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const targets = cards
-    .map((card) => ({
-      card,
-      period: getUpcomingStatementPeriod(card, today),
-    }))
-    .filter(
-      (item): item is { card: (typeof cards)[number]; period: StatementPeriod } =>
-        item.period !== null,
-    );
+  /*
+   * 카드마다 "다음 결제일"부터 3회차를 후보로 둔다.
+   * 이미 납부를 끝낸 회차에 머물러 있으면 안 되기 때문이다 — 8/25 분을
+   * 냈으면 그 카드는 9/25 를 기다리는 상태다.
+   */
+  const candidates = cards
+    .map((card) => {
+      const first = getUpcomingStatementPeriod(card, today);
+      if (!first) return null;
 
-  if (targets.length === 0) return [];
+      const base = fromYearMonth(first.yearMonth);
+      const periods: StatementPeriod[] = [];
+
+      for (let offset = 0; offset < 3; offset += 1) {
+        const probe = new Date(base.getFullYear(), base.getMonth() + offset, 1);
+        const period = getStatementPeriod(card, toYearMonth(probe));
+        if (period) periods.push(period);
+      }
+
+      return periods.length > 0 ? { card, periods } : null;
+    })
+    .filter((item) => item !== null);
+
+  if (candidates.length === 0) return [];
+
+  // 후보 회차의 납부 여부를 먼저 확인해야 어느 회차를 보여줄지 정할 수 있다
+  const paidStatements = await prisma.cardStatement.findMany({
+    where: {
+      householdId,
+      yearMonth: {
+        in: [
+          ...new Set(
+            candidates.flatMap(({ periods }) =>
+              periods.map((period) => period.yearMonth),
+            ),
+          ),
+        ],
+      },
+    },
+  });
+
+  const targets = candidates.map(({ card, periods }) => {
+    const unpaid = periods.find((period) => {
+      const row = paidStatements.find(
+        (item) => item.cardId === card.id && item.yearMonth === period.yearMonth,
+      );
+      return !row?.isPaid;
+    });
+
+    // 3회차가 전부 납부 완료면(선납) 마지막 회차를 가리킨다
+    return { card, period: unpaid ?? periods[periods.length - 1] };
+  });
 
   // 카드마다 결제 달이 다를 수 있으니, 전체를 덮는 범위로 한 번만 조회한다
   const times = targets.map((item) => item.period.billingDate.getTime());
@@ -460,24 +532,16 @@ export async function getUpcomingCardPayments(
     999,
   );
 
-  const [plans, statements] = await Promise.all([
-    prisma.installmentPlan.findMany({
-      where: {
-        billingDate: { gte: rangeStart, lte: rangeEnd },
-        transaction: { householdId },
-      },
-      include: {
-        transaction: { select: { cardId: true, merchant: true } },
-      },
-      orderBy: { billingDate: "asc" },
-    }),
-    prisma.cardStatement.findMany({
-      where: {
-        householdId,
-        yearMonth: { in: targets.map((item) => item.period.yearMonth) },
-      },
-    }),
-  ]);
+  const plans = await prisma.installmentPlan.findMany({
+    where: {
+      billingDate: { gte: rangeStart, lte: rangeEnd },
+      transaction: { householdId },
+    },
+    include: {
+      transaction: { select: { cardId: true, merchant: true } },
+    },
+    orderBy: { billingDate: "asc" },
+  });
 
   return targets.map(({ card, period }) => {
     // 그 카드의, 그 결제월에 청구되는 회차만 모은다
@@ -495,7 +559,7 @@ export async function getUpcomingCardPayments(
       .reduce((sum, plan) => sum + plan.amount, 0);
 
     const statement =
-      statements.find(
+      paidStatements.find(
         (row) => row.cardId === card.id && row.yearMonth === period.yearMonth,
       ) ?? null;
 
