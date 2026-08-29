@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { Pencil } from "lucide-react";
 import { CategoryIcon } from "@/components/category-icon";
 import { FixedItemActions } from "@/components/fixed-item-actions";
 import { OCCURRENCE_STATUS_LABEL, RECURRING_KIND_META } from "@/lib/labels";
@@ -36,7 +38,11 @@ export function FixedItemCard({
           <CategoryIcon icon={meta.emoji} color={meta.color} size="lg" />
         )}
 
-        <div className="min-w-0 flex-1">
+        {/* 눌러서 금액·날짜·받는 사람 같은 설정을 고친다 */}
+        <Link
+          href={`/fixed/${row.id}`}
+          className="-my-1 min-w-0 flex-1 rounded-lg py-1 transition active:opacity-70"
+        >
           <div className="flex items-center gap-1.5">
             <p className="truncate text-sm font-bold">{row.name}</p>
             {!compact && (
@@ -44,9 +50,11 @@ export function FixedItemCard({
                 {meta.label}
               </span>
             )}
+            <Pencil className="size-3 shrink-0 text-muted" aria-hidden />
           </div>
 
           <p className="mt-0.5 truncate text-xs text-muted">
+            {row.ownerName && `${row.ownerName} · `}
             매월 {row.dueDay}일 · {row.methodText}
             {row.isAmountVariable && " · 변동"}
           </p>
@@ -75,7 +83,7 @@ export function FixedItemCard({
               {OCCURRENCE_STATUS_LABEL[row.status]}
             </span>
           </div>
-        </div>
+        </Link>
       </div>
 
       {!isPaid && !isSkipped && (

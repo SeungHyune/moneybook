@@ -241,12 +241,13 @@ model HouseholdMember {
   household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  ownedAccounts   Account[]     @relation("AccountOwner")
-  ownedCards      Card[]        @relation("CardOwner")
-  createdAccounts Account[]     @relation("AccountCreatedBy")
-  createdCards    Card[]        @relation("CardCreatedBy")
-  createdTx       Transaction[] @relation("TxCreatedBy")
-  paidTx          Transaction[] @relation("TxPaidBy")
+  ownedAccounts   Account[]       @relation("AccountOwner")
+  ownedCards      Card[]          @relation("CardOwner")
+  ownedRules      RecurringRule[] @relation("RuleOwner")
+  createdAccounts Account[]       @relation("AccountCreatedBy")
+  createdCards    Card[]          @relation("CardCreatedBy")
+  createdTx       Transaction[]   @relation("TxCreatedBy")
+  paidTx          Transaction[]   @relation("TxPaidBy")
 
   @@unique([householdId, userId])
   @@index([userId])
@@ -534,6 +535,10 @@ model RecurringRule {
   dueDateShift DueDateShift @default(NONE)
 
   // --- 결제 수단 ---
+  /// 누구 항목인지 (월급 받는 사람, 보험료 내는 사람). 비우면 공용.
+  /// 카드/계좌 소유자로 유추하면 "둘 다 같은 통장" 인 경우 갈리지 않는다.
+  ownerMemberId String? @db.Uuid
+
   paymentMethod PaymentMethod @default(AUTO_DEBIT)
   cardId        String?       @db.Uuid
   accountId     String?       @db.Uuid
@@ -553,11 +558,12 @@ model RecurringRule {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  card      Card?     @relation(fields: [cardId], references: [id], onDelete: SetNull)
-  account   Account?  @relation("RuleAccount", fields: [accountId], references: [id], onDelete: SetNull)
-  toAccount Account?  @relation("RuleToAccount", fields: [toAccountId], references: [id], onDelete: SetNull)
-  category  Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  household   Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  ownerMember HouseholdMember? @relation("RuleOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
+  card        Card?            @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  account     Account?         @relation("RuleAccount", fields: [accountId], references: [id], onDelete: SetNull)
+  toAccount   Account?         @relation("RuleToAccount", fields: [toAccountId], references: [id], onDelete: SetNull)
+  category    Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   occurrences  RecurringOccurrence[]
   transactions Transaction[]

@@ -730,9 +730,9 @@ export async function getFixedSchedule(
   householdId: string,
   yearMonth: string,
   /*
-   * 구성원 보기. 규칙 자체에는 주인이 없고 결제 수단에 있으므로,
-   * 연결된 카드나 계좌의 소유자로 가른다. 카드/계좌를 안 붙인 규칙은
-   * 누구 것인지 알 수 없어 개인 보기에서는 빠진다.
+   * 구성원 보기. 규칙에 주인(ownerMemberId)을 정했으면 그걸 따르고,
+   * 안 정했으면 연결된 카드/계좌 소유자로 유추한다. 부부가 같은 통장으로
+   * 월급을 받으면 유추만으로는 갈리지 않아서 직접 지정할 수 있게 뒀다.
    */
   memberId?: string | null,
 ) {
@@ -743,8 +743,9 @@ export async function getFixedSchedule(
       ...(memberId
         ? {
             OR: [
-              { card: { ownerMemberId: memberId } },
-              { account: { ownerMemberId: memberId } },
+              { ownerMemberId: memberId },
+              { ownerMemberId: null, card: { ownerMemberId: memberId } },
+              { ownerMemberId: null, account: { ownerMemberId: memberId } },
             ],
           }
         : {}),
@@ -762,6 +763,7 @@ export async function getFixedSchedule(
       },
       account: { select: { name: true, bankName: true } },
       category: { select: { name: true, icon: true, color: true } },
+      ownerMember: { select: { displayName: true } },
       occurrences: { where: { yearMonth } },
     },
   });

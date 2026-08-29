@@ -1,9 +1,13 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
-import { createRecurringRule } from "@/app/actions/recurring";
+import { ChevronLeft, Trash2 } from "lucide-react";
+import {
+  createRecurringRule,
+  deleteRecurringRule,
+  updateRecurringRule,
+} from "@/app/actions/recurring";
 import { CategoryIcon } from "@/components/category-icon";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
@@ -37,6 +41,30 @@ type Options = {
     bankName: string | null;
     ownerMember?: Owner;
   }[];
+  members: { id: string; displayName: string | null }[];
+};
+
+/** 수정할 때 넘어오는 기존 값 */
+export type EditingRule = {
+  id: string;
+  name: string;
+  kind: RecurringKind;
+  amount: number;
+  isAmountVariable: boolean;
+  frequency: Frequency;
+  dayOfMonth: number | null;
+  weekday: number | null;
+  monthOfYear: number | null;
+  dueDateShift: string;
+  ownerMemberId: string | null;
+  paymentMethod: PaymentMethod;
+  cardId: string | null;
+  accountId: string | null;
+  toAccountId: string | null;
+  categoryId: string | null;
+  notifyDaysBefore: number;
+  memo: string | null;
+  type: string;
 };
 
 const KIND_ORDER: RecurringKind[] = [
@@ -73,17 +101,32 @@ const FREQUENCIES: Frequency[] = [
 export function RecurringForm({
   householdId,
   options,
+  rule,
 }: {
   householdId: string;
   options: Options;
+  /** 있으면 수정, 없으면 등록 */
+  rule?: EditingRule;
 }) {
   const router = useRouter();
-  const [state, formAction] = useActionState(createRecurringRule, null);
+  const [state, formAction] = useActionState(
+    rule ? updateRecurringRule : createRecurringRule,
+    null,
+  );
+  const [isDeleting, startDelete] = useTransition();
 
-  const [kind, setKind] = useState<RecurringKind>("MAINTENANCE_FEE");
-  const [frequency, setFrequency] = useState<Frequency>("MONTHLY");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("AUTO_DEBIT");
-  const [isAmountVariable, setIsAmountVariable] = useState(false);
+  const [kind, setKind] = useState<RecurringKind>(
+    rule?.kind ?? "MAINTENANCE_FEE",
+  );
+  const [frequency, setFrequency] = useState<Frequency>(
+    rule?.frequency ?? "MONTHLY",
+  );
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
+    rule?.paymentMethod ?? "AUTO_DEBIT",
+  );
+  const [isAmountVariable, setIsAmountVariable] = useState(
+    rule?.isAmountVariable ?? false,
+  );
 
   const meta = RECURRING_KIND_META[kind];
 
@@ -92,7 +135,7 @@ export function RecurringForm({
    * 옮기는 것이다. 지출로 넣으면 "이번 달 쓴 돈" 이 실제보다 커진다.
    * 그래서 지출 성격 항목에 한해 "이체로 등록" 을 고를 수 있게 뒀다.
    */
-  const [asTransfer, setAsTransfer] = useState(false);
+  const [asTransfer, setAsTransfer] = useState(rule?.type === "TRANSFER");
   const canBeTransfer = meta.type === "EXPENSE" && options.accounts.length >= 2;
   const isTransfer = canBeTransfer && asTransfer;
   const type = isTransfer ? "TRANSFER" : meta.type;
@@ -104,6 +147,7 @@ export function RecurringForm({
   return (
     <form action={formAction} className="pb-8">
       <input type="hidden" name="householdId" value={householdId} />
+      {rule && <input type="hidden" name="ruleId" value={rule.id} />}
       <input type="hidden" name="kind" value={kind} />
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="frequency" value={frequency} />
@@ -127,8 +171,28 @@ export function RecurringForm({
           >
             <ChevronLeft className="size-5" />
           </button>
-          <h1 className="text-base font-bold">고정지출 등록</h1>
-          <div className="size-9" />
+          <h1 className="text-base font-bold">
+            {rule ? "고정 항목 수정" : "고정지출 등록"}
+          </h1>
+
+          {rule ? (
+            <button
+              type="button"
+              onClick={() =>
+                startDelete(async () => {
+                  await deleteRecurringRule(rule.id);
+                  router.push("/fixed");
+                })
+              }
+              disabled={isDeleting}
+              aria-label="삭제"
+              className="flex size-9 items-center justify-center rounded-full text-expense active:bg-surface-muted disabled:opacity-50"
+            >
+              <Trash2 className="size-4" />
+            </button>
+          ) : (
+            <div className="size-9" />
+          )}
         </div>
       </header>
 
@@ -195,7 +259,7 @@ export function RecurringForm({
             required
             maxLength={40}
             placeholder={`예: ${meta.label}`}
-            defaultValue={meta.label}
+            defaultValue={rule?.name ?? meta.label}
             autoComplete="off"
           />
         </Field>
@@ -215,6 +279,7 @@ export function RecurringForm({
             min={0}
             required
             placeholder="0"
+            defaultValue={rule?.amount}
             className="text-right"
           />
         </Field>
@@ -259,7 +324,7 @@ export function RecurringForm({
               inputMode="numeric"
               min={1}
               max={31}
-              defaultValue={25}
+              defaultValue={rule?.dayOfMonth ?? 25}
               required
             />
           </Field>
@@ -272,13 +337,13 @@ export function RecurringForm({
                 inputMode="numeric"
                 min={1}
                 max={12}
-                defaultValue={1}
+                defaultValue={rule?.monthOfYear ?? 1}
               />
             </Field>
           )}
 
           <Field label="주말이면">
-            <Select name="dueDateShift" defaultValue="NONE">
+            <Select name="dueDateShift" defaultValue={rule?.dueDateShift ?? "NONE"}>
               <option value="NONE">그대로</option>
               <option value="PREV_BUSINESS_DAY">앞당김 (급여일)</option>
               <option value="NEXT_BUSINESS_DAY">미룸</option>
@@ -312,7 +377,7 @@ export function RecurringForm({
 
         {paymentMethod === "CARD" ? (
           <Field label="카드">
-            <Select name="cardId" defaultValue="">
+            <Select name="cardId" defaultValue={rule?.cardId ?? ""}>
               <option value="">선택 안 함</option>
               {options.cards.map((card) => (
                 <option key={card.id} value={card.id}>
@@ -334,7 +399,7 @@ export function RecurringForm({
                   : "출금 계좌"
             }
           >
-            <Select name="accountId" defaultValue="" required={isTransfer}>
+            <Select name="accountId" defaultValue={rule?.accountId ?? ""} required={isTransfer}>
               <option value="">선택 안 함</option>
               {options.accounts.map((account) => (
                 <option key={account.id} value={account.id}>
@@ -349,7 +414,7 @@ export function RecurringForm({
 
         {isTransfer && (
           <Field label="받는 계좌">
-            <Select name="toAccountId" defaultValue="" required>
+            <Select name="toAccountId" defaultValue={rule?.toAccountId ?? ""} required>
               <option value="">선택하세요</option>
               {options.accounts.map((account) => (
                 <option key={account.id} value={account.id}>
@@ -365,9 +430,27 @@ export function RecurringForm({
           </Field>
         )}
 
+        {/*
+          카드/계좌 소유자로 유추하면 부부가 같은 통장을 쓸 때 갈리지 않는다.
+          월급처럼 "누구 것" 이 분명한 항목은 여기서 직접 정한다.
+        */}
+        <Field
+          label={type === "INCOME" ? "누가 받나요" : "누구 항목인가요"}
+          hint="구성원별로 볼 때 이 기준으로 갈려요."
+        >
+          <Select name="ownerMemberId" defaultValue={rule?.ownerMemberId ?? ""}>
+            <option value="">공용 (구분 안 함)</option>
+            {options.members.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.displayName ?? "이름 없음"}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
         {!isTransfer && (
         <Field label="카테고리">
-          <Select name="categoryId" defaultValue="">
+          <Select name="categoryId" defaultValue={rule?.categoryId ?? ""}>
             <option value="">선택 안 함</option>
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
@@ -379,7 +462,7 @@ export function RecurringForm({
         )}
 
         <Field label="알림" hint="납부일 전에 알려드려요.">
-          <Select name="notifyDaysBefore" defaultValue="1">
+          <Select name="notifyDaysBefore" defaultValue={String(rule?.notifyDaysBefore ?? 1)}>
             <option value="0">당일</option>
             <option value="1">1일 전</option>
             <option value="3">3일 전</option>
@@ -388,7 +471,12 @@ export function RecurringForm({
         </Field>
 
         <Field label="메모 (선택)">
-          <Textarea name="memo" maxLength={200} placeholder="남길 말" />
+          <Textarea
+            name="memo"
+            maxLength={200}
+            placeholder="남길 말"
+            defaultValue={rule?.memo ?? ""}
+          />
         </Field>
 
         {state?.error && (
@@ -401,7 +489,7 @@ export function RecurringForm({
         )}
 
         <SubmitButton size="lg" className="w-full">
-          등록하기
+          {rule ? "수정 저장하기" : "등록하기"}
         </SubmitButton>
       </div>
     </form>

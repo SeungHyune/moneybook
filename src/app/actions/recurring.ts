@@ -53,6 +53,8 @@ const recurringSchema = z.object({
     "GIFT_CARD",
     "OTHER",
   ]),
+  /** 누구 항목인지 (비우면 공용) */
+  ownerMemberId: z.string().uuid().optional().or(z.literal("")),
   cardId: z.string().uuid().optional().or(z.literal("")),
   accountId: z.string().uuid().optional().or(z.literal("")),
   /** 이체(TRANSFER)일 때 받는 계좌 */
@@ -308,4 +310,73 @@ export async function skipOccurrence(ruleId: string, yearMonth: string) {
 /** 오늘 기준 이번 달 문자열 */
 export async function currentYearMonth() {
   return toYearMonth(new Date());
+}
+
+/**
+ * 고정 항목 수정.
+ *
+ * 지금까지는 만들고 지우는 것만 있어서, 월급 받는 통장이 바뀌거나 종류를
+ * 잘못 고르면 지우고 다시 만들어야 했다. 그러면 그동안 확인 처리한
+ * 이력(RecurringOccurrence)까지 함께 날아간다.
+ */
+export async function updateRecurringRule(
+  _prevState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const ruleId = String(formData.get("ruleId") ?? "");
+  if (!ruleId) return { error: "항목을 찾을 수 없어요." };
+
+  // 생성과 같은 방식으로 읽는다 (체크박스·빈 문자열 처리 포함)
+  const raw = Object.fromEntries(formData) as Record<string, string>;
+  const parsed = recurringSchema.safeParse({
+    ...raw,
+    isAmountVariable:
+      raw.isAmountVariable === "on" || raw.isAmountVariable === "true",
+    dayOfMonth: raw.dayOfMonth || undefined,
+    weekday: raw.weekday || undefined,
+    monthOfYear: raw.monthOfYear || undefined,
+  });
+
+  if (!parsed.success) {
+    return {
+      error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요.",
+    };
+  }
+
+  const data = parsed.data;
+
+  const rule = await prisma.recurringRule.findFirst({
+    where: { id: ruleId, householdId: data.householdId },
+    select: { id: true },
+  });
+  if (!rule) return { error: "항목을 찾을 수 없어요." };
+
+  await requireMembership(data.householdId, "MEMBER");
+
+  await prisma.recurringRule.update({
+    where: { id: ruleId },
+    data: {
+      name: data.name,
+      kind: data.kind,
+      type: data.type,
+      amount: data.amount,
+      isAmountVariable: data.isAmountVariable,
+      frequency: data.frequency,
+      dayOfMonth: data.dayOfMonth ?? null,
+      weekday: data.weekday ?? null,
+      monthOfYear: data.monthOfYear ?? null,
+      dueDateShift: data.dueDateShift,
+      ownerMemberId: nullify(data.ownerMemberId),
+      paymentMethod: data.paymentMethod,
+      cardId: nullify(data.cardId),
+      accountId: nullify(data.accountId),
+      toAccountId: nullify(data.toAccountId),
+      categoryId: nullify(data.categoryId),
+      notifyDaysBefore: data.notifyDaysBefore,
+      memo: nullify(data.memo),
+    },
+  });
+
+  revalidatePath("/", "layout");
+  redirect("/fixed");
 }

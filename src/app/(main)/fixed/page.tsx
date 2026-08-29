@@ -45,6 +45,7 @@ export default async function FixedPage({ searchParams }: PageProps<"/fixed">) {
     dueDay: item.dueDate.getDate(),
     isAmountVariable: item.rule.isAmountVariable,
     status: item.status,
+    ownerName: item.rule.ownerMember?.displayName ?? null,
     methodText: item.rule.card
       ? `${item.rule.card.name}${item.rule.card.last4 ? ` (${item.rule.card.last4})` : ""}`
       : item.rule.account

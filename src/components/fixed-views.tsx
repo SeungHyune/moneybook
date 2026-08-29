@@ -29,6 +29,8 @@ export type FixedRow = {
   methodText: string;
   isAmountVariable: boolean;
   status: OccurrenceStatus;
+  /** 누구 항목인지 — 부부가 같은 은행을 쓰면 이름만으론 구분이 안 된다 */
+  ownerName: string | null;
 };
 
 export function FixedViews({
