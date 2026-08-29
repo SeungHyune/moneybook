@@ -724,7 +724,15 @@ export async function getTransactions(
       ...(accountId
         ? { OR: [{ accountId }, { toAccountId: accountId }] }
         : {}),
-      ...(categoryId ? { categoryId } : {}),
+      /*
+       * "none" 은 카테고리를 안 정한 내역. 미분류가 많으면 예산 진행률이
+       * 거짓말을 하니, 예산 화면에서 여기로 바로 걸러 보낼 수 있어야 한다.
+       */
+      ...(categoryId === "none"
+        ? { categoryId: null }
+        : categoryId
+          ? { categoryId }
+          : {}),
       ...(payerMemberId ? { payerMemberId } : {}),
     },
     include: {
@@ -929,4 +937,149 @@ export async function getUpcomingFixed(householdId: string, days = 7) {
   }
 
   return thisMonth.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+}
+
+// ---------------------------------------------------------------------------
+// 예산 / 저축 목표
+// ---------------------------------------------------------------------------
+
+export type BudgetOverview = Awaited<ReturnType<typeof getBudgetOverview>>;
+
+/**
+ * 이번 달 예산 현황.
+ *
+ * Budget 은 달마다 행이 따로라, 그대로 두면 새 달이 될 때마다 예산이
+ * 사라진 것처럼 보인다. 매달 다시 짜게 하면 아무도 안 쓰므로,
+ * 이번 달 행이 없으면 가장 최근 달 값을 그대로 이어받아 보여준다.
+ * (수정할 때 비로소 이번 달 행이 생긴다 — actions/budget.ts)
+ */
+export async function getBudgetOverview(
+  householdId: string,
+  yearMonth: string,
+  monthStartDay: number,
+  memberId?: string | null,
+) {
+  const [rows, breakdown, categories] = await Promise.all([
+    // 이번 달 것과, 없을 때 물려받을 이전 달들을 한 번에 가져온다
+    prisma.budget.findMany({
+      where: { householdId, yearMonth: { lte: yearMonth } },
+      orderBy: { yearMonth: "desc" },
+    }),
+    getCategoryBreakdown(householdId, yearMonth, monthStartDay, memberId),
+    prisma.category.findMany({
+      where: { householdId, type: "EXPENSE", isActive: true },
+      orderBy: { sortOrder: "asc" },
+      select: { id: true, name: true, icon: true, color: true },
+    }),
+  ]);
+
+  const thisMonth = rows.filter((row) => row.yearMonth === yearMonth);
+  const isInherited = thisMonth.length === 0;
+
+  /** 이번 달 값이 없으면 가장 최근에 정해둔 값 */
+  function budgetFor(categoryId: string | null) {
+    const own = thisMonth.find((row) => row.categoryId === categoryId);
+    if (own) return own.amount;
+    if (!isInherited) return null;
+    return rows.find((row) => row.categoryId === categoryId)?.amount ?? null;
+  }
+
+  const spentByCategory = new Map(
+    breakdown.map((row) => [row.categoryId, row]),
+  );
+
+  const items = categories
+    .map((category) => {
+      const limit = budgetFor(category.id);
+      const spent = spentByCategory.get(category.id)?.amount ?? 0;
+
+      return {
+        categoryId: category.id,
+        name: category.name,
+        icon: category.icon ?? "📌",
+        color: category.color,
+        limit,
+        spent,
+        remaining: limit === null ? null : limit - spent,
+        ratio: limit && limit > 0 ? spent / limit : null,
+      };
+    })
+    // 한도를 정한 것 먼저, 그 다음 많이 쓴 순
+    .sort((a, b) => {
+      if ((a.limit === null) !== (b.limit === null)) return a.limit ? -1 : 1;
+      return b.spent - a.spent;
+    });
+
+  const monthlyLimit = budgetFor(null);
+  const totalSpent = breakdown.reduce((sum, row) => sum + row.amount, 0);
+
+  // 카테고리 한도의 합 — 월 한도 안에서 얼마나 배정했는지 보여준다
+  const assigned = items.reduce((sum, item) => sum + (item.limit ?? 0), 0);
+
+  const uncategorized = breakdown.find((row) => row.categoryId === null);
+
+  return {
+    yearMonth,
+    isInherited,
+    monthlyLimit,
+    totalSpent,
+    assigned,
+    items,
+    /** 예산에 잡히지 않는 돈 — 이게 크면 진행률이 거짓말을 한다 */
+    uncategorized: uncategorized
+      ? { amount: uncategorized.amount, ratio: uncategorized.ratio }
+      : null,
+    /** 한도를 하나라도 정했는지 */
+    hasAnyBudget: monthlyLimit !== null || items.some((i) => i.limit !== null),
+  };
+}
+
+/**
+ * 이번 달이 얼마나 지났는지.
+ * "오늘까지 이 정도면 적정" 을 계산해 페이스를 알려주는 데 쓴다.
+ */
+export function getMonthProgress(
+  yearMonth: string,
+  monthStartDay: number,
+  today = new Date(),
+) {
+  const { start, end } = getMonthRange(yearMonth, monthStartDay);
+
+  const totalMs = end.getTime() - start.getTime();
+  const elapsedMs = today.getTime() - start.getTime();
+
+  // 지난 달을 보고 있으면 100%, 다음 달이면 0%
+  const ratio = Math.min(1, Math.max(0, elapsedMs / totalMs));
+
+  return {
+    start,
+    end,
+    ratio,
+    daysTotal: Math.round(totalMs / 86_400_000) + 1,
+    daysLeft: Math.max(0, Math.ceil((end.getTime() - today.getTime()) / 86_400_000)),
+    isCurrent: today >= start && today <= end,
+  };
+}
+
+/** 저축 목표 — 모인 금액은 연결한 계좌 잔액에서 읽는다 */
+export async function getSavingsGoals(householdId: string) {
+  const goals = await prisma.savingsGoal.findMany({
+    where: { householdId },
+    include: {
+      account: { select: { id: true, name: true, bankName: true, balance: true } },
+    },
+    orderBy: [{ isAchieved: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
+  });
+
+  return goals.map((goal) => {
+    const saved = goal.startAmount + (goal.account?.balance ?? 0);
+    const ratio = goal.targetAmount > 0 ? saved / goal.targetAmount : 0;
+
+    return {
+      ...goal,
+      saved,
+      remaining: Math.max(0, goal.targetAmount - saved),
+      ratio: Math.min(1, Math.max(0, ratio)),
+    };
+  });
 }

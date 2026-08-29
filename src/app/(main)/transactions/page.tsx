@@ -33,6 +33,9 @@ export default async function TransactionsPage({
       ? monthParam
       : toYearMonth(new Date());
 
+  // 예산 화면의 "미분류 정리하기" 에서 넘어온다
+  const onlyUncategorized = params.category === "none";
+
   const typeParam = params.type;
   const type =
     typeParam === "EXPENSE" || typeParam === "INCOME" || typeParam === "TRANSFER"
@@ -58,6 +61,7 @@ export default async function TransactionsPage({
       type,
       take: 200,
       payerMemberId: memberId,
+      ...(onlyUncategorized ? { categoryId: "none" } : {}),
     }),
   ]);
 
@@ -107,12 +111,28 @@ export default async function TransactionsPage({
           </div>
         </div>
 
+        {/* 미분류만 보는 중 — 어디서 왔는지, 어떻게 빠져나가는지 알려준다 */}
+        {onlyUncategorized && (
+          <div className="flex items-center justify-between gap-2 rounded-2xl bg-warning/10 px-4 py-3">
+            <p className="text-sm font-medium text-warning">
+              카테고리를 안 정한 내역만 보고 있어요
+            </p>
+            <Link
+              href={`/transactions?month=${yearMonth}`}
+              className="shrink-0 text-xs text-warning underline underline-offset-2"
+            >
+              전체 보기
+            </Link>
+          </div>
+        )}
+
         {/* 종류 필터 */}
         <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4">
           {FILTERS.map((filter) => {
             const isActive = (type ?? "") === filter.value;
             const query = new URLSearchParams({ month: yearMonth });
             if (filter.value) query.set("type", filter.value);
+            if (onlyUncategorized) query.set("category", "none");
 
             return (
               <Link

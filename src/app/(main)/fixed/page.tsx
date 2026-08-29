@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { MonthSwitcher } from "@/components/month-switcher";
+import { PlanTabs } from "@/components/plan-tabs";
 import { FixedViews, type FixedRow } from "@/components/fixed-views";
 import { requireHouseholdContext } from "@/lib/auth";
 import { getFixedSchedule } from "@/lib/queries";
@@ -54,8 +55,8 @@ export default async function FixedPage({ searchParams }: PageProps<"/fixed">) {
   return (
     <>
       <AppHeader
-        title="고정지출"
-        subtitle="매월 반복되는 수입과 지출"
+        title="계획"
+        subtitle="예산과 고정지출"
         action={
           <Link
             href="/fixed/new"
@@ -68,6 +69,7 @@ export default async function FixedPage({ searchParams }: PageProps<"/fixed">) {
       />
 
       <div className="space-y-4 px-4 py-4">
+        <PlanTabs />
         <MonthSwitcher yearMonth={yearMonth} />
 
         <div className="grid grid-cols-2 gap-3">

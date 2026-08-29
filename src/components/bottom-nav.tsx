@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarClock, CreditCard, Home, Plus, Receipt } from "lucide-react";
+import { CreditCard, Home, Plus, Receipt, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const TABS = [
   { href: "/", label: "홈", icon: Home },
   { href: "/transactions", label: "내역", icon: Receipt },
-  { href: "/fixed", label: "고정지출", icon: CalendarClock },
+  { href: "/budget", label: "계획", icon: Target },
   { href: "/cards", label: "카드/자산", icon: CreditCard },
 ] as const;
 
@@ -24,8 +24,16 @@ export function BottomNav() {
     >
       <div className="flex h-16 items-stretch justify-around px-2">
         {TABS.map(({ href, label, icon: Icon }, index) => {
+          /*
+           * 계획 탭은 /budget 과 /fixed 두 화면을 함께 쓴다 —
+           * 고정지출에 있어도 탭은 켜져 있어야 한다.
+           */
           const isActive =
-            href === "/" ? pathname === "/" : pathname.startsWith(href);
+            href === "/"
+              ? pathname === "/"
+              : href === "/budget"
+                ? pathname.startsWith("/budget") || pathname.startsWith("/fixed")
+                : pathname.startsWith(href);
 
           // 가운데에 등록 버튼을 끼워 넣는다
           const showAddButton = index === 2;
