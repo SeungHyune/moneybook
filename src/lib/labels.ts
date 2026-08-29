@@ -143,3 +143,38 @@ export const BANKS = [
   "우체국",
   "기타",
 ];
+
+/**
+ * "앞으로 나갈 돈" 을 묶어 보는 분류.
+ *
+ * 고정지출의 kind 는 14 가지라 그대로 늘어놓으면 한눈에 안 들어온다.
+ * 성격이 비슷한 것끼리(보험·통신, 구독·회비) 묶고, 카드 청구는 따로 둔다.
+ */
+export const OUTFLOW_GROUPS = [
+  { key: "CARD", label: "카드 결제", emoji: "💳" },
+  { key: "HOUSING", label: "주거·공과금", emoji: "🏢" },
+  { key: "INSURANCE_TELECOM", label: "보험·통신", emoji: "🛡️" },
+  { key: "SUBSCRIPTION", label: "구독·회비", emoji: "🎬" },
+  { key: "SAVING_LOAN", label: "저축·대출", emoji: "🐷" },
+  { key: "ETC", label: "그 밖에", emoji: "📌" },
+  { key: "INCOME", label: "들어올 돈", emoji: "💰" },
+] as const;
+
+export type OutflowGroupKey = (typeof OUTFLOW_GROUPS)[number]["key"];
+
+export const OUTFLOW_GROUP_OF: Record<RecurringKind, OutflowGroupKey> = {
+  SALARY: "INCOME",
+  SIDE_INCOME: "INCOME",
+  CARD_BILL: "CARD",
+  MAINTENANCE_FEE: "HOUSING",
+  RENT: "HOUSING",
+  UTILITY: "HOUSING",
+  TELECOM: "INSURANCE_TELECOM",
+  INSURANCE: "INSURANCE_TELECOM",
+  SUBSCRIPTION: "SUBSCRIPTION",
+  MEMBERSHIP: "SUBSCRIPTION",
+  EDUCATION: "SUBSCRIPTION",
+  SAVINGS: "SAVING_LOAN",
+  LOAN_REPAYMENT: "SAVING_LOAN",
+  OTHER: "ETC",
+};

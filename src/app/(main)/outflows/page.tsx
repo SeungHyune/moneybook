@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
-import { CategoryIcon } from "@/components/category-icon";
 import { MemberFilter } from "@/components/member-filter";
+import { OutflowViews, type OutflowRow } from "@/components/outflow-views";
 import { requireHouseholdContext } from "@/lib/auth";
 import { getMemberFilter } from "@/lib/member-filter";
 import {
@@ -45,26 +45,32 @@ export default async function OutflowsPage() {
   const timeline = [
     ...outflows.map((item) => ({
       key: item.key,
+      group: item.group,
       date: item.date,
       name: item.name,
       note: item.note,
       emoji: item.emoji,
       color: item.color,
       amount: -item.amount,
-      dday: item.dday,
-      isOverdue: item.isOverdue,
+      ddayLabel: item.isOverdue
+        ? `${-item.dday}일 밀림`
+        : item.dday === 0
+          ? "오늘"
+          : `D-${item.dday}`,
+      isUrgent: item.isOverdue || item.dday <= 2,
       href: item.href as string,
     })),
     ...inflows.map((item) => ({
       key: `in-${item.name}-${item.date.toISOString()}`,
+      group: "INCOME" as const,
       date: item.date,
       name: item.name,
       note: "들어올 돈",
       emoji: "💰",
       color: "#2563eb",
       amount: item.amount,
-      dday: item.dday,
-      isOverdue: false,
+      ddayLabel: item.dday === 0 ? "오늘" : `D-${item.dday}`,
+      isUrgent: false,
       href: "/fixed",
     })),
   ].sort((a, b) => a.date.getTime() - b.date.getTime());
@@ -73,14 +79,25 @@ export default async function OutflowsPage() {
    * 각 건까지 처리했을 때 남는 돈. map 안에서 바깥 변수를 더해 나가면
    * 렌더 중 재할당이라 react-hooks/purity 에 걸린다 — reduce 로 쌓는다.
    */
-  const rows = timeline.reduce<((typeof timeline)[number] & { running: number })[]>(
-    (acc, item) => {
-      const previous = acc.at(-1)?.running ?? assets.total;
-      acc.push({ ...item, running: previous + item.amount });
-      return acc;
-    },
-    [],
-  );
+  const rows = timeline.reduce<OutflowRow[]>((acc, item) => {
+    const previous = acc.at(-1)?.running ?? assets.total;
+
+    acc.push({
+      key: item.key,
+      group: item.group,
+      name: item.name,
+      note: item.note,
+      emoji: item.emoji,
+      color: item.color,
+      amount: item.amount,
+      dateLabel: `${item.date.getMonth() + 1}/${item.date.getDate()}`,
+      ddayLabel: item.ddayLabel,
+      isUrgent: item.isUrgent,
+      running: previous + item.amount,
+      href: item.href,
+    });
+    return acc;
+  }, []);
 
   return (
     <>
@@ -92,12 +109,11 @@ export default async function OutflowsPage() {
             selectedId={memberId}
           />
         }
-        subtitle="오늘부터 한 달"
       />
 
       <div className="space-y-4 px-4 py-4">
         <section className="rounded-2xl bg-primary p-5 text-primary-foreground">
-          <p className="text-xs opacity-80">한 달 뒤 남을 돈</p>
+          <p className="text-xs opacity-80">오늘부터 한 달 뒤 남을 돈</p>
           <p className="tabular mt-1 text-3xl font-bold tracking-tight">
             {formatWon(assets.total + inTotal - outTotal)}
           </p>
@@ -138,61 +154,7 @@ export default async function OutflowsPage() {
             <p className="text-sm text-muted">한 달 안에 나갈 돈이 없어요.</p>
           </div>
         ) : (
-          <section className="space-y-2">
-            <h2 className="px-1 text-sm font-bold">날짜순</h2>
-
-            <ul className="divide-y divide-border rounded-2xl border border-border bg-surface px-4">
-              {rows.map((item) => (
-                <li key={item.key}>
-                  <Link
-                    href={item.href as "/fixed"}
-                    className="-mx-2 flex items-center gap-3 rounded-xl px-2 py-3 transition active:bg-surface-muted"
-                  >
-                    <CategoryIcon
-                      icon={item.emoji}
-                      color={item.color}
-                      size="md"
-                    />
-
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">
-                        {item.name}
-                      </p>
-                      <p className="truncate text-xs text-muted">
-                        {item.date.getMonth() + 1}/{item.date.getDate()} ·{" "}
-                        {item.note}
-                      </p>
-                    </div>
-
-                    <div className="shrink-0 text-right">
-                      <p
-                        className={`tabular text-sm font-bold ${
-                          item.amount > 0 ? "text-income" : ""
-                        }`}
-                      >
-                        {item.amount > 0 ? "+" : "−"}
-                        {formatWon(Math.abs(item.amount))}
-                      </p>
-                      {/* 이 건까지 처리하면 얼마가 남는지 */}
-                      <p
-                        className={`text-[11px] ${
-                          item.running < 0 ? "text-expense" : "text-muted"
-                        }`}
-                      >
-                        남음 {formatWon(item.running)}
-                      </p>
-                    </div>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-
-            <p className="px-1 text-[11px] leading-relaxed text-muted">
-              &ldquo;남음&rdquo;은 지금 가진 돈에서 이 건까지 순서대로 더하고
-              뺀 값이에요. 중간에 마이너스가 되면 그 시점에 돈이 모자란다는
-              뜻입니다.
-            </p>
-          </section>
+          <OutflowViews rows={rows} />
         )}
 
         <Link

@@ -18,7 +18,11 @@ export function AppHeader({
       className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur"
       style={{ paddingTop: "var(--safe-top)" }}
     >
-      <div className="flex h-14 items-center justify-between gap-2 px-4">
+      {/*
+        h-14 고정이면 제목이 컴포넌트(구성원 선택기)인데 부제목까지 있을 때
+        내용이 넘쳐 글자가 잘린다. 최소 높이로 두고 필요하면 늘어나게 한다.
+      */}
+      <div className="flex min-h-14 items-center justify-between gap-2 px-4 py-1">
         <div className="min-w-0">
           {/*
             문자열 제목만 truncate 되는 h1 로 감싼다.

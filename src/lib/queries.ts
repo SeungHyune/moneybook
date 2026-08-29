@@ -5,7 +5,11 @@ import {
   getUpcomingStatementPeriod,
   type StatementPeriod,
 } from "@/lib/billing";
-import { RECURRING_KIND_META } from "@/lib/labels";
+import {
+  OUTFLOW_GROUP_OF,
+  RECURRING_KIND_META,
+  type OutflowGroupKey,
+} from "@/lib/labels";
 import {
   addMonths,
   dayOfMonthToDate,
@@ -1258,6 +1262,7 @@ export async function getCashflowHorizon(
       return {
         key: `fixed-${item.rule.id}-${item.dueDate.toISOString()}`,
         kind: "FIXED" as const,
+        group: OUTFLOW_GROUP_OF[item.rule.kind] as OutflowGroupKey,
         name: item.rule.name,
         note: item.rule.isAmountVariable ? "금액 변동" : meta.label,
         amount: item.amount,
@@ -1275,6 +1280,7 @@ export async function getCashflowHorizon(
     .map((item) => ({
       key: `card-${item.card.id}`,
       kind: "CARD" as const,
+      group: "CARD" as OutflowGroupKey,
       name: item.card.ownerMember?.displayName
         ? `${item.card.ownerMember.displayName} · ${item.card.name}`
         : item.card.name,
