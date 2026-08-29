@@ -1,16 +1,11 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
-import { CategoryIcon } from "@/components/category-icon";
 import { MonthSwitcher } from "@/components/month-switcher";
-import { FixedItemActions } from "@/components/fixed-item-actions";
+import { FixedViews, type FixedRow } from "@/components/fixed-views";
 import { requireHouseholdContext } from "@/lib/auth";
 import { getFixedSchedule } from "@/lib/queries";
-import {
-  OCCURRENCE_STATUS_LABEL,
-  PAYMENT_METHOD_LABEL,
-  RECURRING_KIND_META,
-} from "@/lib/labels";
+import { PAYMENT_METHOD_LABEL } from "@/lib/labels";
 import { formatWon, toYearMonth } from "@/lib/utils";
 
 export const metadata = { title: "고정지출" };
@@ -34,6 +29,27 @@ export default async function FixedPage({ searchParams }: PageProps<"/fixed">) {
   const expectedExpense = expense.reduce((sum, item) => sum + item.amount, 0);
 
   const paidCount = schedule.filter((item) => item.status === "PAID").length;
+
+  /*
+   * 화면에서 쓸 모양으로 미리 정리한다. 결제수단 표기처럼 관계를 타고
+   * 들어가는 건 서버에서 끝내고, 클라이언트는 묶고 접는 일만 하게 둔다.
+   */
+  const rows: FixedRow[] = schedule.map((item) => ({
+    id: item.rule.id,
+    name: item.rule.name,
+    kind: item.rule.kind,
+    type: item.rule.type === "INCOME" ? "INCOME" : "EXPENSE",
+    amount: item.amount,
+    ruleAmount: item.rule.amount,
+    dueDay: item.dueDate.getDate(),
+    isAmountVariable: item.rule.isAmountVariable,
+    status: item.status,
+    methodText: item.rule.card
+      ? `${item.rule.card.name}${item.rule.card.last4 ? ` (${item.rule.card.last4})` : ""}`
+      : item.rule.account
+        ? `${item.rule.account.bankName ?? ""} ${item.rule.account.name}`.trim()
+        : PAYMENT_METHOD_LABEL[item.rule.paymentMethod],
+  }));
 
   return (
     <>
@@ -94,89 +110,7 @@ export default async function FixedPage({ searchParams }: PageProps<"/fixed">) {
             </Link>
           </div>
         ) : (
-          <ul className="space-y-2">
-            {schedule.map((item) => {
-              const meta = RECURRING_KIND_META[item.rule.kind];
-              const isPaid = item.status === "PAID";
-              const isSkipped = item.status === "SKIPPED";
-              const isOverdue = item.status === "OVERDUE";
-
-              const methodText = item.rule.card
-                ? `${item.rule.card.name}${item.rule.card.last4 ? ` (${item.rule.card.last4})` : ""}`
-                : item.rule.account
-                  ? `${item.rule.account.bankName ?? ""} ${item.rule.account.name}`.trim()
-                  : PAYMENT_METHOD_LABEL[item.rule.paymentMethod];
-
-              return (
-                <li
-                  key={item.rule.id}
-                  className={`rounded-2xl border border-border bg-surface p-4 ${
-                    isSkipped ? "opacity-50" : ""
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <CategoryIcon
-                      icon={meta.emoji}
-                      color={meta.color}
-                      size="lg"
-                    />
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <p className="truncate text-sm font-bold">
-                          {item.rule.name}
-                        </p>
-                        <span className="shrink-0 rounded-md bg-surface-muted px-1.5 py-0.5 text-[10px] text-muted">
-                          {meta.label}
-                        </span>
-                      </div>
-
-                      <p className="mt-0.5 truncate text-xs text-muted">
-                        매월 {item.dueDate.getDate()}일 · {methodText}
-                        {item.rule.isAmountVariable && " · 변동"}
-                      </p>
-
-                      <div className="mt-1 flex items-center gap-2">
-                        <span
-                          className={`tabular text-sm font-bold ${
-                            item.rule.type === "INCOME"
-                              ? "text-income"
-                              : "text-foreground"
-                          }`}
-                        >
-                          {item.rule.type === "INCOME" ? "+" : ""}
-                          {formatWon(item.amount)}
-                        </span>
-
-                        <span
-                          className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
-                            isPaid
-                              ? "bg-success/15 text-success"
-                              : isOverdue
-                                ? "bg-expense/15 text-expense"
-                                : isSkipped
-                                  ? "bg-surface-muted text-muted"
-                                  : "bg-warning/15 text-warning"
-                          }`}
-                        >
-                          {OCCURRENCE_STATUS_LABEL[item.status]}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {!isPaid && !isSkipped && (
-                    <FixedItemActions
-                      ruleId={item.rule.id}
-                      yearMonth={yearMonth}
-                      defaultAmount={item.rule.amount}
-                      isAmountVariable={item.rule.isAmountVariable}
-                    />
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <FixedViews rows={rows} yearMonth={yearMonth} />
         )}
       </div>
     </>
