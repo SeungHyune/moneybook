@@ -43,6 +43,11 @@ export type TransactionRowData = {
   payer: { displayName: string | null; color: string } | null;
   /** 통계 합계에서 빠지는 건 (카드대금 납부, 기존 카드값 등) */
   excludeFromStats?: boolean;
+  /** 이번 달에 잡히는 금액. 할부면 그 회차 금액 (없으면 amount) */
+  monthlyAmount?: number;
+  /** 할부 회차 — 2/4 처럼 보여준다 */
+  round?: number | null;
+  totalRounds?: number | null;
 };
 
 /**
@@ -73,7 +78,17 @@ export function TransactionRow({
     payer,
     occurredAt,
     excludeFromStats,
+    round,
+    totalRounds,
   } = transaction;
+
+  /*
+   * 할부는 원금이 아니라 이번 달 나가는 회차 금액을 큰 숫자로 둔다.
+   * 지출 합계가 회차 기준이라, 원금을 크게 쓰면 목록을 더해도 합계가
+   * 안 맞는다. 원금은 아래에 작게 적는다.
+   */
+  const shownAmount = transaction.monthlyAmount ?? amount;
+  const isInstallmentRound = Boolean(totalRounds && totalRounds > 1 && round);
 
   const title = merchant || category?.name || memo || "내역";
 
@@ -152,10 +167,17 @@ export function TransactionRow({
         </p>
       </div>
 
-      <span className={`tabular shrink-0 text-sm font-bold ${amountColor}`}>
-        {sign}
-        {formatWon(amount)}
-      </span>
+      <div className="shrink-0 text-right">
+        <span className={`tabular text-sm font-bold ${amountColor}`}>
+          {sign}
+          {formatWon(shownAmount)}
+        </span>
+        {isInstallmentRound && (
+          <p className="text-[10px] text-muted">
+            {round}/{totalRounds}회차 · 총 {formatWon(amount)}
+          </p>
+        )}
+      </div>
     </>
   );
 

@@ -8,8 +8,8 @@ import { prisma } from "@/lib/prisma";
 import { getMemberFilter } from "@/lib/member-filter";
 import {
   getHouseholdMembers,
+  getMonthlyLedger,
   getMonthlySummary,
-  getTransactions,
 } from "@/lib/queries";
 import { formatRelativeDate, formatWon, toYearMonth } from "@/lib/utils";
 
@@ -72,7 +72,8 @@ export default async function TransactionsPage({
       memberId,
       categoryParam,
     ),
-    getTransactions(household.id, {
+    // 지출 합계와 같은 기준(할부는 이번 달 회차)으로 목록을 만든다
+    getMonthlyLedger(household.id, {
       yearMonth,
       monthStartDay: household.monthStartDay,
       type,
@@ -85,7 +86,7 @@ export default async function TransactionsPage({
   // 날짜별로 묶어서 보여준다
   const groups = new Map<string, typeof transactions>();
   for (const transaction of transactions) {
-    const key = transaction.occurredAt.toDateString();
+    const key = transaction.ledgerDate.toDateString();
     const list = groups.get(key) ?? [];
     list.push(transaction);
     groups.set(key, list);

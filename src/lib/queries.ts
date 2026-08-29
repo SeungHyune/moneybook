@@ -41,6 +41,72 @@ export function getMonthRange(yearMonth: string, monthStartDay: number) {
 export type MonthlySummary = Awaited<ReturnType<typeof getMonthlySummary>>;
 
 /** 한 달 수입/지출/남은돈. memberId 를 주면 그 사람이 결제한 것만 */
+
+/**
+ * 그 달의 지출을 "실제로 나가는 돈" 기준으로 모은다.
+ *
+ * 할부는 원금 전체를 산 달에 몰아넣지 않는다. 4개월 할부로 222만원짜리를
+ * 사면 그 달에 222만원을 쓴 게 아니라 55.6만원이 나가고, 나머지는 다음 달
+ * 이후에 나간다. 원금 전체로 세면 "이번 달 쓴 돈" 이 실제와 크게 어긋난다.
+ *
+ * 할부 회차는 카드 결제일(billingDate) 기준이다 — 그날 통장에서 빠진다.
+ * 할부가 아닌 건은 지금까지처럼 산 날(occurredAt) 기준.
+ */
+async function getExpenseParts(
+  householdId: string,
+  start: Date,
+  end: Date,
+  memberId?: string | null,
+  categoryId?: string | null,
+) {
+  const scope = {
+    householdId,
+    type: "EXPENSE" as const,
+    excludeFromStats: false,
+    ...(memberId ? { payerMemberId: memberId } : {}),
+    ...(categoryId === "none"
+      ? { categoryId: null }
+      : categoryId
+        ? { categoryId }
+        : {}),
+  };
+
+  const [single, plans] = await Promise.all([
+    prisma.transaction.findMany({
+      where: {
+        ...scope,
+        installmentMonths: { lte: 1 },
+        occurredAt: { gte: start, lte: end },
+      },
+      select: { id: true, amount: true, categoryId: true },
+    }),
+    prisma.installmentPlan.findMany({
+      where: {
+        totalRounds: { gt: 1 },
+        billingDate: { gte: start, lte: end },
+        transaction: scope,
+      },
+      select: {
+        amount: true,
+        transaction: { select: { id: true, categoryId: true } },
+      },
+    }),
+  ]);
+
+  return {
+    rows: [
+      ...single.map((row) => ({ amount: row.amount, categoryId: row.categoryId })),
+      ...plans.map((row) => ({
+        amount: row.amount,
+        categoryId: row.transaction.categoryId,
+      })),
+    ],
+    total:
+      single.reduce((sum, row) => sum + row.amount, 0) +
+      plans.reduce((sum, row) => sum + row.amount, 0),
+  };
+}
+
 export async function getMonthlySummary(
   householdId: string,
   yearMonth: string,
@@ -51,27 +117,30 @@ export async function getMonthlySummary(
 ) {
   const { start, end } = getMonthRange(yearMonth, monthStartDay);
 
-  const grouped = await prisma.transaction.groupBy({
-    by: ["type"],
-    where: {
-      householdId,
-      occurredAt: { gte: start, lte: end },
-      excludeFromStats: false,
-      ...(memberId ? { payerMemberId: memberId } : {}),
-      ...(categoryId === "none"
-        ? { categoryId: null }
-        : categoryId
-          ? { categoryId }
-          : {}),
-    },
-    _sum: { amount: true },
-    _count: true,
-  });
+  const [grouped, expenseParts] = await Promise.all([
+    prisma.transaction.groupBy({
+      by: ["type"],
+      where: {
+        householdId,
+        occurredAt: { gte: start, lte: end },
+        excludeFromStats: false,
+        ...(memberId ? { payerMemberId: memberId } : {}),
+        ...(categoryId === "none"
+          ? { categoryId: null }
+          : categoryId
+            ? { categoryId }
+            : {}),
+      },
+      _sum: { amount: true },
+      _count: true,
+    }),
+    getExpenseParts(householdId, start, end, memberId, categoryId),
+  ]);
 
   const income =
     grouped.find((row) => row.type === "INCOME")?._sum.amount ?? 0;
-  const expense =
-    grouped.find((row) => row.type === "EXPENSE")?._sum.amount ?? 0;
+  // 할부는 이번 달 청구되는 회차만 (getExpenseParts 주석 참고)
+  const expense = expenseParts.total;
   /*
    * 계좌 간 이동은 수입도 지출도 아니다 — 내 통장에서 내 통장으로 옮긴 것뿐이라
    * 총액이 줄지 않는다. 합계에는 넣지 않되, 얼마가 오갔는지는 따로 돌려준다.
@@ -102,33 +171,31 @@ export async function getCategoryBreakdown(
 ) {
   const { start, end } = getMonthRange(yearMonth, monthStartDay);
 
-  const grouped = await prisma.transaction.groupBy({
-    by: ["categoryId"],
-    where: {
-      householdId,
-      type: "EXPENSE",
-      occurredAt: { gte: start, lte: end },
-      excludeFromStats: false,
-      ...(memberId ? { payerMemberId: memberId } : {}),
-    },
-    _sum: { amount: true },
-  });
+  // 지출 합계와 같은 기준으로 센다 — 할부는 이번 달 회차만
+  const [{ rows, total }, categories] = await Promise.all([
+    getExpenseParts(householdId, start, end, memberId),
+    prisma.category.findMany({
+      where: { householdId },
+      select: { id: true, name: true, icon: true, color: true },
+    }),
+  ]);
 
-  const categories = await prisma.category.findMany({
-    where: { householdId },
-    select: { id: true, name: true, icon: true, color: true },
-  });
   const categoryMap = new Map(categories.map((c) => [c.id, c]));
 
-  const total = grouped.reduce((sum, row) => sum + (row._sum.amount ?? 0), 0);
+  const byCategory = new Map<string | null, number>();
+  for (const row of rows) {
+    byCategory.set(
+      row.categoryId,
+      (byCategory.get(row.categoryId) ?? 0) + row.amount,
+    );
+  }
 
-  return grouped
-    .map((row) => {
-      const category = row.categoryId ? categoryMap.get(row.categoryId) : null;
-      const amount = row._sum.amount ?? 0;
+  return [...byCategory.entries()]
+    .map(([categoryId, amount]) => {
+      const category = categoryId ? categoryMap.get(categoryId) : null;
 
       return {
-        categoryId: row.categoryId,
+        categoryId,
         name: category?.name ?? "미분류",
         icon: category?.icon ?? "❓",
         color: category?.color ?? "#9ca3af",
@@ -1330,4 +1397,125 @@ export async function getHomeHero(
     comingTotal,
     summary,
   };
+}
+
+export type MonthlyLedgerRow = Awaited<
+  ReturnType<typeof getMonthlyLedger>
+>[number];
+
+/**
+ * 한 달 내역 — 지출 합계와 같은 기준으로 맞춘 목록.
+ *
+ * getTransactions 는 산 날(occurredAt) 로만 자르기 때문에, 할부를 회차
+ * 기준으로 세기 시작하면 목록과 합계가 어긋난다. 지난달에 산 할부의
+ * 이번 달 회차가 합계에는 들어가는데 목록에는 없기 때문이다.
+ *
+ * 그래서 이 함수는
+ *  - 할부가 아닌 건은 산 날 기준으로 담고
+ *  - 할부는 이번 달에 청구되는 회차를 담는다 (금액은 회차 금액)
+ * 각 줄에 원금과 회차(2/4)를 같이 실어 보내 화면에서 함께 보여준다.
+ */
+export async function getMonthlyLedger(
+  householdId: string,
+  {
+    yearMonth,
+    monthStartDay,
+    type,
+    categoryId,
+    payerMemberId,
+    take = 200,
+  }: {
+    yearMonth: string;
+    monthStartDay: number;
+    type?: "INCOME" | "EXPENSE" | "TRANSFER";
+    categoryId?: string;
+    payerMemberId?: string | null;
+  take?: number;
+  },
+) {
+  const { start, end } = getMonthRange(yearMonth, monthStartDay);
+
+  const scope = {
+    householdId,
+    ...(type ? { type } : {}),
+    ...(payerMemberId ? { payerMemberId } : {}),
+    ...(categoryId === "none"
+      ? { categoryId: null }
+      : categoryId
+        ? { categoryId }
+        : {}),
+  };
+
+  const include = {
+    category: { select: { name: true, icon: true, color: true } },
+    card: {
+      select: {
+        name: true,
+        issuer: true,
+        color: true,
+        last4: true,
+        ownerMember: { select: { displayName: true } },
+      },
+    },
+    account: {
+      select: {
+        name: true,
+        bankName: true,
+        ownerMember: { select: { displayName: true } },
+      },
+    },
+    toAccount: {
+      select: {
+        name: true,
+        bankName: true,
+        ownerMember: { select: { displayName: true } },
+      },
+    },
+    payer: { select: { displayName: true, color: true } },
+  } as const;
+
+  const [single, plans] = await Promise.all([
+    prisma.transaction.findMany({
+      where: {
+        ...scope,
+        installmentMonths: { lte: 1 },
+        occurredAt: { gte: start, lte: end },
+      },
+      include,
+      orderBy: { occurredAt: "desc" },
+      take,
+    }),
+    prisma.installmentPlan.findMany({
+      where: {
+        totalRounds: { gt: 1 },
+        billingDate: { gte: start, lte: end },
+        transaction: scope,
+      },
+      include: { transaction: { include } },
+      orderBy: { billingDate: "desc" },
+      take,
+    }),
+  ]);
+
+  const rows = [
+    ...single.map((row) => ({
+      ...row,
+      /** 이번 달에 잡히는 금액 */
+      monthlyAmount: row.amount,
+      /** 목록에서 이 줄이 놓이는 날 */
+      ledgerDate: row.occurredAt,
+      round: null as number | null,
+      totalRounds: null as number | null,
+    })),
+    ...plans.map((plan) => ({
+      ...plan.transaction,
+      monthlyAmount: plan.amount,
+      // 할부는 산 날이 아니라 빠져나가는 날에 놓는다
+      ledgerDate: plan.billingDate,
+      round: plan.round,
+      totalRounds: plan.totalRounds,
+    })),
+  ].sort((a, b) => b.ledgerDate.getTime() - a.ledgerDate.getTime());
+
+  return rows.slice(0, take);
 }
