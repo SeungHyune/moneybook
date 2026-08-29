@@ -228,17 +228,17 @@ async function HeroSection({
       {/* 한 줄 요약 타일 — 눌러서 각 화면으로 */}
       <div className="grid grid-cols-3 gap-2">
         <Tile
-          href="/cards"
+          href="/accounts"
           label="가진 돈"
           value={formatWonShort(hero.assets.total)}
         />
         <Tile
-          href="/budget"
+          href={`/transactions?month=${yearMonth}&type=EXPENSE`}
           label="이번 달 쓴 돈"
           value={formatWonShort(hero.spent)}
         />
         <Tile
-          href="/transactions"
+          href={`/transactions?month=${yearMonth}&type=INCOME`}
           label="이번 달 번 돈"
           value={formatWonShort(hero.summary.income)}
           tone="income"
@@ -261,20 +261,24 @@ async function HeroSection({
   );
 }
 
+/**
+ * 요약 타일. 누르면 그 금액이 어떤 내역으로 나온 건지 볼 수 있어야 한다 —
+ * 숫자만 크게 띄워두면 맞는지 확인할 방법이 없다.
+ */
 function Tile({
   href,
   label,
   value,
   tone,
 }: {
-  href: "/cards" | "/budget" | "/transactions";
+  href: string;
   label: string;
   value: string;
   tone?: "income";
 }) {
   return (
     <Link
-      href={href}
+      href={href as "/accounts"}
       className="rounded-2xl border border-border bg-surface px-3 py-3 transition active:bg-surface-muted"
     >
       <p className="truncate text-[11px] text-muted">{label}</p>
