@@ -3,7 +3,6 @@ import { Pencil, Plus } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { CardStatementActions } from "@/components/card-statement-actions";
 import { MemberFilter } from "@/components/member-filter";
-import { MonthSwitcher } from "@/components/month-switcher";
 import { getMemberFilter } from "@/lib/member-filter";
 import { canManageAsset, requireHouseholdContext } from "@/lib/auth";
 import {
@@ -25,11 +24,13 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
   // 수정 권한이 없는 항목에 직접 접근했을 때 돌아오는 표시
   const forbidden = params.error === "forbidden";
 
-  const monthParam = params.month;
-  const yearMonth =
-    typeof monthParam === "string" && /^\d{4}-\d{2}$/.test(monthParam)
-      ? monthParam
-      : toYearMonth(new Date());
+  /*
+   * 이 화면은 "지금" 상태를 보는 곳이다 — 잔액은 현재값이고 신용카드는
+   * 다음 결제일 기준이라 월을 바꿔도 대부분 그대로였다. 그래서 월 선택기를
+   * 없앴고, 체크카드 사용액만 이번 달 기준으로 계산한다.
+   * 월별로 보려면 카드/계좌를 눌러 상세로 들어가면 된다.
+   */
+  const yearMonth = toYearMonth(new Date());
 
   const [filterMember, members] = await Promise.all([
     getMemberFilter(household.id),
@@ -85,8 +86,6 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
       />
 
       <div className="space-y-4 px-4 py-4">
-        <MonthSwitcher yearMonth={yearMonth} />
-
         {forbidden && (
           <p
             className="rounded-xl bg-expense/10 px-4 py-3 text-center text-sm text-expense"
@@ -127,6 +126,10 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
             </ul>
           </div>
 
+          {/*
+            카드마다 결제일이 달라서 합계만 보면 "언제 나가는 돈인지" 알 수 없다.
+            그래서 카드별로 날짜와 금액을 함께 적는다.
+          */}
           <div className="border-t border-border pt-3">
             <div className="flex items-baseline justify-between">
               <span className="text-sm font-bold">갚을 돈</span>
@@ -134,12 +137,32 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                 {formatWon(totalUpcoming + assets.loanDebt)}
               </span>
             </div>
+            <p className="mt-0.5 text-[11px] text-muted">
+              카드별 다음 결제 예정액의 합계예요
+            </p>
 
             <ul className="mt-2 space-y-1">
-              <li className="flex items-center justify-between text-xs">
-                <span className="text-muted">다음 카드 결제</span>
-                <span className="tabular">{formatWon(totalUpcoming)}</span>
-              </li>
+              {upcomingPayments
+                .filter((item) => item.total > 0 && !item.statement?.isPaid)
+                .sort((a, b) => a.dday - b.dday)
+                .map((item) => (
+                  <li
+                    key={item.card.id}
+                    className="flex items-center justify-between gap-2 text-xs"
+                  >
+                    <span className="min-w-0 truncate text-muted">
+                      {item.period.billingDate.getMonth() + 1}/
+                      {item.period.billingDate.getDate()} · {item.card.name}
+                      {item.dday >= 0 && item.dday <= 3 && (
+                        <span className="ml-1 text-expense">D-{item.dday}</span>
+                      )}
+                    </span>
+                    <span className="tabular shrink-0">
+                      {formatWon(item.total)}
+                    </span>
+                  </li>
+                ))}
+
               {assets.loanDebt > 0 && (
                 <li className="flex items-center justify-between text-xs">
                   <span className="text-muted">대출 잔액</span>
@@ -248,7 +271,7 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                           </>
                         ) : (
                           <p className="text-[10px] text-muted">
-                            {Number(yearMonth.split("-")[1])}월 쓴 금액
+                            이번 달 쓴 금액
                           </p>
                         )}
                       </div>
