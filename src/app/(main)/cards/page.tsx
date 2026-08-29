@@ -158,9 +158,13 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                       {item.period.billingDate.getDate()} ·{" "}
                       {item.card.issuer ? `${item.card.issuer} ` : ""}
                       {item.card.name}
-                      {item.total > 0 && item.dday >= 0 && item.dday <= 3 && (
+                      {item.isOverdue ? (
+                        <span className="ml-1 font-medium text-expense">
+                          아직 안 냄
+                        </span>
+                      ) : item.total > 0 && item.dday >= 0 && item.dday <= 3 ? (
                         <span className="ml-1 text-expense">D-{item.dday}</span>
-                      )}
+                      ) : null}
                     </span>
                     {item.total > 0 ? (
                       <span className="tabular shrink-0">
@@ -264,12 +268,16 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                         </p>
                         {isCredit && period ? (
                           <>
-                            <p className="text-[10px] text-muted">
+                            <p
+                              className={`text-[10px] ${upcoming?.isOverdue ? "font-medium text-expense" : "text-muted"}`}
+                            >
                               {period.billingDate.getMonth() + 1}/
                               {period.billingDate.getDate()} 결제
-                              {upcoming && upcoming.dday >= 0
-                                ? ` · D-${upcoming.dday}`
-                                : ""}
+                              {upcoming?.isOverdue
+                                ? ` · ${-upcoming.dday}일 밀림`
+                                : upcoming && upcoming.dday >= 0
+                                  ? ` · D-${upcoming.dday}`
+                                  : ""}
                             </p>
                             <p className="text-[10px] text-muted">
                               {period.periodStart.getMonth() + 1}/
@@ -364,6 +372,8 @@ export default async function CardsPage({ searchParams }: PageProps<"/cards">) {
                       paidAmount={statement?.totalAmount ?? null}
                       canUndo={upcoming?.canUndo ?? true}
                       isOverdue={upcoming?.isOverdue ?? false}
+                      isPeriodOpen={upcoming?.isPeriodOpen ?? false}
+                      periodEndLabel={`${period.periodEnd.getMonth() + 1}월 ${period.periodEnd.getDate()}일`}
                     />
                   )}
                 </li>

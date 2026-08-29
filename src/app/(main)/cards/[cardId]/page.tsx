@@ -206,6 +206,8 @@ export default async function CardDetailPage({
               paidAmount={statement?.totalAmount ?? null}
               canUndo={canUndo}
               isOverdue={isOverdue}
+              isPeriodOpen={detail.isPeriodOpen}
+              periodEndLabel={`${period.periodEnd.getMonth() + 1}월 ${period.periodEnd.getDate()}일`}
             />
           </div>
         )}

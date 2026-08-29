@@ -329,7 +329,14 @@ export async function getCardStatementDetail(
     : true;
   const isOverdue = !statement?.isPaid && period.billingDate.getTime() < now;
 
+  /*
+   * 이용기간이 아직 안 끝났으면 청구액이 확정되지 않는다 — 지금 납부
+   * 처리해 버리면 그 뒤에 긁은 금액이 이 청구서에 계속 붙어 기록이 어긋난다.
+   */
+  const isPeriodOpen = period.periodEnd.getTime() > now;
+
   return {
+    isPeriodOpen,
     card,
     period,
     statement,
@@ -414,18 +421,29 @@ export async function getCardBillingOptions(
   });
 
   /*
-   * 처음 열었을 때 보여줄 회차 = 다음 결제일부터 훑어 아직 안 낸 첫 회차.
-   * 이번 회차를 이미 냈으면 그 다음이 열린다.
+   * 처음 열었을 때 보여줄 회차 — 카드 목록이 고르는 것과 같은 기준.
+   * 연체분이 있으면 그것부터, 없으면 아직 안 낸 다음 회차.
    * (날짜 비교를 화면에서 하면 렌더 중 Date 접근이 되므로 여기서 정한다)
    */
   const ascending = [...options].reverse();
-  const fromUpcoming = ascending.filter(
-    (option) => option.yearMonth >= baseYearMonth,
+
+  const overdue = ascending.find(
+    (option) =>
+      option.period &&
+      option.period.billingDate < today &&
+      !option.statement?.isPaid &&
+      option.total > 0,
+  );
+
+  const next = ascending.find(
+    (option) =>
+      option.period &&
+      option.period.billingDate >= today &&
+      !option.statement?.isPaid,
   );
 
   const defaultYearMonth =
-    fromUpcoming.find((option) => !option.statement?.isPaid)?.yearMonth ??
-    baseYearMonth;
+    overdue?.yearMonth ?? next?.yearMonth ?? baseYearMonth;
 
   return { options, defaultYearMonth };
 }
@@ -464,9 +482,14 @@ export async function getUpcomingCardPayments(
   today.setHours(0, 0, 0, 0);
 
   /*
-   * 카드마다 "다음 결제일"부터 3회차를 후보로 둔다.
-   * 이미 납부를 끝낸 회차에 머물러 있으면 안 되기 때문이다 — 8/25 분을
-   * 냈으면 그 카드는 9/25 를 기다리는 상태다.
+   * 카드마다 "지금 신경 써야 할 청구서" 하나를 고른다.
+   *
+   *   1) 결제일이 지났는데 아직 안 낸 게 있으면 그게 먼저다 (연체)
+   *   2) 없으면 아직 오지 않은 결제일 중 안 낸 첫 회차
+   *
+   * 전에는 "오늘 이후 첫 결제일"만 봐서, 결제일이 하루만 지나도 미납분이
+   * 화면에서 사라졌다. 8/25 를 안 낸 채 8/26 이 되면 9/25 만 보이는 식이라
+   * 실제로 낸 8 월분을 9 월분에 체크하게 되는 사고가 났다.
    */
   const candidates = cards
     .map((card) => {
@@ -476,7 +499,8 @@ export async function getUpcomingCardPayments(
       const base = fromYearMonth(first.yearMonth);
       const periods: StatementPeriod[] = [];
 
-      for (let offset = 0; offset < 3; offset += 1) {
+      // 과거 3회차 ~ 미래 2회차 (과거 → 미래 순)
+      for (let offset = -3; offset <= 2; offset += 1) {
         const probe = new Date(base.getFullYear(), base.getMonth() + offset, 1);
         const period = getStatementPeriod(card, toYearMonth(probe));
         if (period) periods.push(period);
@@ -488,36 +512,10 @@ export async function getUpcomingCardPayments(
 
   if (candidates.length === 0) return [];
 
-  // 후보 회차의 납부 여부를 먼저 확인해야 어느 회차를 보여줄지 정할 수 있다
-  const paidStatements = await prisma.cardStatement.findMany({
-    where: {
-      householdId,
-      yearMonth: {
-        in: [
-          ...new Set(
-            candidates.flatMap(({ periods }) =>
-              periods.map((period) => period.yearMonth),
-            ),
-          ),
-        ],
-      },
-    },
-  });
-
-  const targets = candidates.map(({ card, periods }) => {
-    const unpaid = periods.find((period) => {
-      const row = paidStatements.find(
-        (item) => item.cardId === card.id && item.yearMonth === period.yearMonth,
-      );
-      return !row?.isPaid;
-    });
-
-    // 3회차가 전부 납부 완료면(선납) 마지막 회차를 가리킨다
-    return { card, period: unpaid ?? periods[periods.length - 1] };
-  });
-
-  // 카드마다 결제 달이 다를 수 있으니, 전체를 덮는 범위로 한 번만 조회한다
-  const times = targets.map((item) => item.period.billingDate.getTime());
+  // 후보 전체를 덮는 범위로 한 번만 조회한다
+  const times = candidates.flatMap(({ periods }) =>
+    periods.map((period) => period.billingDate.getTime()),
+  );
   const earliest = new Date(Math.min(...times));
   const latest = new Date(Math.max(...times));
 
@@ -532,50 +530,92 @@ export async function getUpcomingCardPayments(
     999,
   );
 
-  const plans = await prisma.installmentPlan.findMany({
-    where: {
-      billingDate: { gte: rangeStart, lte: rangeEnd },
-      transaction: { householdId },
-    },
-    include: {
-      transaction: { select: { cardId: true, merchant: true } },
-    },
-    orderBy: { billingDate: "asc" },
-  });
+  const [plans, statements] = await Promise.all([
+    prisma.installmentPlan.findMany({
+      where: {
+        billingDate: { gte: rangeStart, lte: rangeEnd },
+        transaction: { householdId },
+      },
+      include: {
+        transaction: { select: { cardId: true, merchant: true } },
+      },
+      orderBy: { billingDate: "asc" },
+    }),
+    prisma.cardStatement.findMany({
+      where: {
+        householdId,
+        yearMonth: {
+          in: [
+            ...new Set(
+              candidates.flatMap(({ periods }) =>
+                periods.map((period) => period.yearMonth),
+              ),
+            ),
+          ],
+        },
+      },
+    }),
+  ]);
 
-  return targets.map(({ card, period }) => {
-    // 그 카드의, 그 결제월에 청구되는 회차만 모은다
-    const cardPlans = plans.filter(
-      (plan) =>
-        plan.transaction.cardId === card.id &&
-        toYearMonth(plan.billingDate) === period.yearMonth,
+  return candidates.map(({ card, periods }) => {
+    const rows = periods.map((period) => {
+      // 그 카드의, 그 결제월에 청구되는 회차만 모은다
+      const cardPlans = plans.filter(
+        (plan) =>
+          plan.transaction.cardId === card.id &&
+          toYearMonth(plan.billingDate) === period.yearMonth,
+      );
+
+      const lumpSum = cardPlans
+        .filter((plan) => plan.totalRounds === 1)
+        .reduce((sum, plan) => sum + plan.amount, 0);
+      const installment = cardPlans
+        .filter((plan) => plan.totalRounds > 1)
+        .reduce((sum, plan) => sum + plan.amount, 0);
+
+      const statement =
+        statements.find(
+          (row) => row.cardId === card.id && row.yearMonth === period.yearMonth,
+        ) ?? null;
+
+      return {
+        period,
+        statement,
+        lumpSum,
+        installment,
+        total: lumpSum + installment,
+        isPaid: Boolean(statement?.isPaid),
+      };
+    });
+
+    // 1) 연체 — 결제일이 지났는데 청구액이 있고 아직 안 냈다
+    const overdue = rows.find(
+      (row) => row.period.billingDate < today && !row.isPaid && row.total > 0,
     );
 
-    const lumpSum = cardPlans
-      .filter((plan) => plan.totalRounds === 1)
-      .reduce((sum, plan) => sum + plan.amount, 0);
-    const installment = cardPlans
-      .filter((plan) => plan.totalRounds > 1)
-      .reduce((sum, plan) => sum + plan.amount, 0);
+    // 2) 아직 오지 않은 결제일 중 안 낸 첫 회차
+    const next = rows.find(
+      (row) => row.period.billingDate >= today && !row.isPaid,
+    );
 
-    const statement =
-      paidStatements.find(
-        (row) => row.cardId === card.id && row.yearMonth === period.yearMonth,
-      ) ?? null;
+    const picked = overdue ?? next ?? rows[rows.length - 1];
+    const { period, statement, lumpSum, installment, total } = picked;
 
     return {
       card,
       period,
       lumpSum,
       installment,
-      total: lumpSum + installment,
+      total,
       statement,
       canUndo: statement?.paidAt
-        ? Math.floor(
-            (Date.now() - statement.paidAt.getTime()) / 86_400_000,
-          ) <= UNDO_WINDOW_DAYS
+        ? Math.floor((Date.now() - statement.paidAt.getTime()) / 86_400_000) <=
+          UNDO_WINDOW_DAYS
         : true,
-      isOverdue: !statement?.isPaid && period.billingDate < new Date(),
+      isOverdue: Boolean(overdue),
+      /** 이용기간이 아직 안 끝나 청구액이 더 늘 수 있는 상태 */
+      isPeriodOpen: period.periodEnd.getTime() > Date.now(),
+      /** 결제일까지 남은 날. 연체면 음수 */
       dday: Math.round(
         (new Date(
           period.billingDate.getFullYear(),

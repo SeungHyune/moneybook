@@ -36,6 +36,8 @@ export function CardStatementActions({
   paidAmount,
   canUndo = true,
   isOverdue = false,
+  isPeriodOpen = false,
+  periodEndLabel,
 }: {
   cardId: string;
   yearMonth: string;
@@ -48,6 +50,10 @@ export function CardStatementActions({
   canUndo?: boolean;
   /** 예정 결제일이 지났는지 — 실제 납부일 입력을 띄울지 결정 */
   isOverdue?: boolean;
+  /** 이용기간이 아직 진행 중인지 — 그동안은 청구액이 확정되지 않는다 */
+  isPeriodOpen?: boolean;
+  /** "9월 11일" 같은 이용기간 종료일 표기 */
+  periodEndLabel?: string;
 }) {
   const [state, formAction] = useActionState(payCardStatement, null);
   const [isEditing, setIsEditing] = useState(false);
@@ -81,6 +87,19 @@ export function CardStatementActions({
           </span>
         )}
       </div>
+    );
+  }
+
+  /*
+    이용기간 중에는 납부 버튼을 내린다. 예전엔 여기서 눌리는 바람에
+    아직 오지 않은 달 청구서에 납부가 찍히는 사고가 났다.
+  */
+  if (isPeriodOpen) {
+    return (
+      <p className="border-t border-border px-4 py-2.5 text-xs text-muted">
+        {periodEndLabel ? `${periodEndLabel}까지` : "아직"} 사용하는 기간이라
+        금액이 더 늘어날 수 있어요. 기간이 끝나면 납부 처리할 수 있습니다.
+      </p>
     );
   }
 

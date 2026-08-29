@@ -74,6 +74,19 @@ export async function payCardStatement(
   const period = getStatementPeriod(card, yearMonth);
   if (!period) return { error: "카드 결제일이 설정되지 않았어요." };
 
+  /*
+   * 이용기간이 안 끝났으면 청구액이 확정되지 않는다. 이걸 막지 않으면
+   * "다음 달 청구서"를 이번 달 카드값으로 착각해 체크하게 되고, 그 뒤에
+   * 긁은 금액이 같은 청구서에 계속 붙어 기록이 어긋난다.
+   */
+  if (period.periodEnd.getTime() > Date.now()) {
+    return {
+      error:
+        `아직 이용기간(~${period.periodEnd.getMonth() + 1}월 ${period.periodEnd.getDate()}일) 중이라` +
+        ` 청구액이 확정되지 않았어요. 기간이 끝난 뒤에 납부 처리해 주세요.`,
+    };
+  }
+
   const existing = await prisma.cardStatement.findUnique({
     where: { cardId_yearMonth: { cardId, yearMonth } },
   });
